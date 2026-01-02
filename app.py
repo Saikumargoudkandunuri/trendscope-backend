@@ -23,50 +23,45 @@ RSS_SOURCES = {
     "TOI": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
 }
 
-# -------------------------------------------------
-# AI HELPERS
-# -------------------------------------------------
-# -------------------------------------------------
-# AI HELPERS (GEMINI – FREE)
-# -------------------------------------------------
+import re
+from datetime import datetime, timedelta
+
+TREND_KEYWORDS = [
+    "breaking", "election", "budget", "crisis", "attack", "launch",
+    "ai", "ipo", "war", "court", "policy", "startup", "india", "modi",
+    "stock", "market", "tech", "google", "apple", "microsoft"
+]
 
 def ai_short_news(text):
-    try:
-        r = model.generate_content(
-            f"Summarize this news in 5 to 10 very simple words:\n{text}"
-        )
-        return r.text.strip()
-    except:
-        return "Summary unavailable"
+    words = re.findall(r"\w+", text)
+    return " ".join(words[:8])
 
 def ai_caption(text):
-    try:
-        r = model.generate_content(
-            f"Write a short, clean Instagram caption for this news:\n{text}"
-        )
-        return r.text.strip()
-    except:
-        return "Caption unavailable"
+    short = ai_short_news(text)
+    return f"{short} 🇮🇳🔥 #Trending #News #India"
 
 def ai_category(text):
-    try:
-        r = model.generate_content(
-            f"Classify this news into one category only: Politics, Tech, Sports, Business, World, Entertainment.\n{text}"
-        )
-        return r.text.strip()
-    except:
-        return "General"
+    t = text.lower()
+    if any(k in t for k in ["election", "government", "policy", "modi"]):
+        return "Politics"
+    if any(k in t for k in ["market", "stock", "ipo", "economy"]):
+        return "Business"
+    if any(k in t for k in ["ai", "tech", "google", "apple"]):
+        return "Tech"
+    if any(k in t for k in ["match", "cricket", "football", "tournament"]):
+        return "Sports"
+    return "General"
 
 def ai_trending_score(title):
-    try:
-        r = model.generate_content(
-            f"Rate how trending this headline is from 0 to 100. Reply with ONLY a number:\n{title}"
-        )
-        score = ''.join(c for c in r.text if c.isdigit())
-        return score if score else "0"
-    except:
-        return "0"
+    score = 10
+    title_l = title.lower()
 
+    for k in TREND_KEYWORDS:
+        if k in title_l:
+            score += 10
+
+    # cap score
+    return str(min(score, 95))
 
 # -------------------------------------------------
 # FETCH NEWS
