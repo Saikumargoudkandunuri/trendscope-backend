@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 import feedparser, requests, os
-from datetime import datetime, timedelta
 import re
 
 # -------------------------------------------------
@@ -36,7 +35,7 @@ def ai_short_news(text):
 
 def ai_caption(text):
     short = ai_short_news(text)
-    return f"{short} 🇮🇳🔥 #Trending #News #India"
+    return f"{short} 🔥 #Trending #News"
 
 def ai_category(text):
     t = text.lower()
@@ -59,16 +58,13 @@ def ai_trending_score(title):
     return str(min(score, 95))
 
 def trend_color(score):
-    try:
-        s = int(score)
-    except:
-        return "#666"
+    s = int(score)
     if s >= 70:
-        return "#d32f2f"
+        return "#ff3d00"
     elif s >= 40:
-        return "#f57c00"
+        return "#ff9100"
     else:
-        return "#666"
+        return "#607d8b"
 
 # -------------------------------------------------
 # FETCH NEWS
@@ -80,8 +76,6 @@ def fetch_news(source_filter=None):
     idx = 0
 
     for source, url in RSS_SOURCES.items():
-        if source_filter and source != source_filter:
-            continue
         feed = feedparser.parse(url)
         for e in feed.entries[:10]:
             article = {
@@ -123,10 +117,8 @@ def fetch_news(source_filter=None):
 # HOME UI
 # -------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-def home(source: str = Query(None), category: str = Query(None)):
-    news = fetch_news(source)
-
-    # 🔥 SORT BY TRENDING
+def home(category: str = Query(None)):
+    news = fetch_news()
     news.sort(key=lambda x: int(x["trend"]), reverse=True)
 
     if category:
@@ -138,28 +130,51 @@ def home(source: str = Query(None), category: str = Query(None)):
         <title>TrendScope</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-        <script>
-        function toggleMode() {
-            document.body.classList.toggle("dark");
-        }
-        </script>
-
         <style>
-            body { font-family: Arial; background:#fff; color:#000; max-width:800px; margin:auto; padding:20px; }
-            body.dark { background:#000; color:#fff; }
-            body.dark a { color:#fff; }
-            a { text-decoration:none; color:#000; }
-            .box { padding:12px; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }
-            .trend { font-weight:bold; }
-            .tabs a { margin-right:10px; font-weight:bold; }
+            body {
+                font-family: 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #f5f7fa, #e3eeff);
+                margin: 0;
+                padding: 20px;
+            }
+            h1 {
+                font-weight: 800;
+                letter-spacing: -1px;
+                color: #1a237e;
+            }
+            .tabs a {
+                margin-right: 12px;
+                font-weight: 600;
+                color: #3949ab;
+                text-decoration: none;
+            }
+            .card {
+                background: #ffffff;
+                border-radius: 14px;
+                padding: 16px;
+                margin: 14px 0;
+                box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .card a {
+                font-size: 17px;
+                font-weight: 600;
+                color: #212121;
+                text-decoration: none;
+            }
+            .trend {
+                font-size: 14px;
+                font-weight: 700;
+            }
         </style>
     </head>
     <body>
 
-    <h2>📰 TrendScope</h2>
-    <button onclick="toggleMode()">🌙 Toggle</button>
+    <h1>📰 TrendScope</h1>
 
-    <div class="tabs" style="margin:15px 0;">
+    <div class="tabs">
         <a href="/">All</a>
         <a href="/?category=Politics">Politics</a>
         <a href="/?category=Tech">Tech</a>
@@ -170,8 +185,8 @@ def home(source: str = Query(None), category: str = Query(None)):
 
     for n in news:
         html += f"""
-        <div class="box">
-            <a href="/news/{n['id']}"><b>{n['title']}</b></a>
+        <div class="card">
+            <a href="/news/{n['id']}">{n['title']}</a>
             <span class="trend" style="color:{trend_color(n['trend'])}">
                 🔥 {n['trend']}%
             </span>
@@ -182,13 +197,13 @@ def home(source: str = Query(None), category: str = Query(None)):
     return html
 
 # -------------------------------------------------
-# DETAIL PAGE
+# DETAIL PAGE (BEAUTIFUL)
 # -------------------------------------------------
 @app.get("/news/{news_id}", response_class=HTMLResponse)
 def news_page(news_id: int):
     item = NEWS_CACHE.get(news_id)
     if not item:
-        return "<h3>Not found. <a href='/'>Back</a></h3>"
+        return "<h3>Not found</h3>"
 
     short = ai_short_news(item["summary"])
     caption = ai_caption(item["summary"])
@@ -199,33 +214,77 @@ def news_page(news_id: int):
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body {{ background:#000; color:#fff; font-family:Arial; padding:20px; }}
-            textarea {{ width:100%; height:90px; }}
-            button {{ padding:12px; margin-top:10px; }}
+            body {{
+                font-family: 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #1a237e, #3949ab);
+                color: white;
+                padding: 20px;
+            }}
+            .box {{
+                background: white;
+                color: #212121;
+                border-radius: 16px;
+                padding: 20px;
+                max-width: 600px;
+                margin: auto;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            }}
+            h2 {{
+                font-weight: 800;
+                margin-bottom: 10px;
+            }}
+            textarea {{
+                width: 100%;
+                height: 80px;
+                border-radius: 10px;
+                padding: 10px;
+                border: none;
+                background: #f5f5f5;
+                margin-bottom: 12px;
+            }}
+            button {{
+                width: 100%;
+                padding: 14px;
+                margin-top: 10px;
+                border-radius: 10px;
+                border: none;
+                font-size: 15px;
+                font-weight: 700;
+                background: #3949ab;
+                color: white;
+            }}
+            a {{
+                color: #bbdefb;
+                text-decoration: none;
+                font-weight: 600;
+            }}
         </style>
     </head>
     <body>
         <a href="/">⬅ Back</a>
-        <h3>{item['title']}</h3>
-        <p><b>Category:</b> {category}</p>
 
-        <p><b>Short News</b></p>
-        <textarea readonly>{short}</textarea>
+        <div class="box">
+            <h2>{item['title']}</h2>
+            <p><b>Category:</b> {category}</p>
 
-        <p><b>Instagram Caption</b></p>
-        <textarea readonly>{caption}</textarea>
+            <p><b>Short News</b></p>
+            <textarea readonly>{short}</textarea>
 
-        <button onclick="window.open('{item['link']}', '_blank')">
-            🔗 Open Full News
-        </button>
+            <p><b>Instagram Caption</b></p>
+            <textarea readonly>{caption}</textarea>
 
-        <button onclick="navigator.share({{
-            title: '{item['title']}',
-            text: '{short}',
-            url: '{item['link']}'
-        }})">
-            📤 Share
-        </button>
+            <button onclick="window.open('{item['link']}', '_blank')">
+                🔗 Open Full News
+            </button>
+
+            <button onclick="navigator.share({{
+                title: '{item['title']}',
+                text: '{short}',
+                url: '{item['link']}'
+            }})">
+                📤 Share
+            </button>
+        </div>
     </body>
     </html>
     """
