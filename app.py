@@ -120,3 +120,16 @@ def home(source: str = Query(None)):
     for i, n in enumerate(news):
         html += f"""
         <div class="box">
+            <a href="/news/{i}?source={source or ''}">
+                <b>{n['title']}</b>
+            </a><br>
+            <span class="tag">{n['source']} {trending_score(n['published'])}</span>
+        </div>
+        """
+
+    html += """
+    </body>
+    </html>
+    """
+
+    return html
