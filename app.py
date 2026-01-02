@@ -186,7 +186,7 @@ def home(source: str = Query(None)):
     html += "</body></html>"
     return html
 
-@app.get("/news/{{news_id}}", response_class=HTMLResponse)
+@app.get("/news/{news_id}", response_class=HTMLResponse)
 def news_page(news_id: int):
     item = NEWS_CACHE.get(news_id)
 
