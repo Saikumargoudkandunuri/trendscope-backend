@@ -4,13 +4,10 @@ import requests
 import feedparser
 from datetime import datetime, timezone
 from collections import Counter
-import time
 
 app = FastAPI()
 
-# =========================
-# CONFIG
-# =========================
+# ================= CONFIG =================
 NEWS_API_KEY = "5b8cdcf858a1405b87ac7fbe53ae86f6"
 
 RSS_SOURCES = {
@@ -21,18 +18,38 @@ RSS_SOURCES = {
     "India Today": "https://www.indiatoday.in/rss/home"
 }
 
-NEWSAPI_URL = "https://newsapi.org/v2/top-headlines"
+NEWSAPI_URL = "https://newsapi.org/v2/everything"
 
-# =========================
-# HELPERS
-# =========================
+# ================= AI CATEGORY ENGINE =================
+CATEGORY_KEYWORDS = {
+    "Politics": ["election", "government", "parliament", "minister", "bjp", "congress", "policy", "law", "vote"],
+    "Tech": ["ai", "artificial intelligence", "tech", "software", "iphone", "android", "google", "microsoft", "startup"],
+    "Sports": ["cricket", "football", "ipl", "match", "tournament", "fifa", "olympics", "score"],
+    "Entertainment": ["movie", "film", "actor", "actress", "cinema", "bollywood", "hollywood", "trailer"],
+    "Business": ["stock", "market", "share", "investment", "economy", "finance", "bank", "startup"],
+    "World": ["usa", "china", "russia", "ukraine", "global", "international", "world"]
+}
+
+def classify_category(title, summary):
+    text = f"{title} {summary}".lower()
+    scores = {cat: 0 for cat in CATEGORY_KEYWORDS}
+
+    for cat, words in CATEGORY_KEYWORDS.items():
+        for w in words:
+            if w in text:
+                scores[cat] += 1
+
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "Viral"
+
+# ================= HELPERS =================
 def parse_time(entry):
     try:
         return datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
     except:
         return datetime.now(timezone.utc)
 
-def trending_score(title, count):
+def trending_score(count):
     if count >= 4:
         return "🔥🔥🔥"
     elif count >= 2:
@@ -40,73 +57,70 @@ def trending_score(title, count):
     else:
         return "🔥"
 
-# =========================
-# FETCH RSS
-# =========================
+# ================= FETCH RSS =================
 def fetch_rss():
     articles = []
     for source, url in RSS_SOURCES.items():
         feed = feedparser.parse(url)
         for entry in feed.entries[:20]:
+            title = entry.title
+            summary = entry.get("summary", "")
             articles.append({
-                "title": entry.title,
-                "summary": entry.get("summary", ""),
+                "title": title,
+                "summary": summary,
                 "link": entry.link,
                 "source": source,
-                "published": parse_time(entry)
+                "published": parse_time(entry),
+                "category": classify_category(title, summary)
             })
     return articles
 
-# =========================
-# FETCH NEWSAPI
-# =========================
+# ================= FETCH NEWSAPI =================
 def fetch_newsapi():
     params = {
-        "country": "in",
-        "apiKey": NEWS_API_KEY,
-        "pageSize": 30
+        "q": "india",
+        "language": "en",
+        "sortBy": "publishedAt",
+        "pageSize": 30,
+        "apiKey": NEWS_API_KEY
     }
     r = requests.get(NEWSAPI_URL, params=params)
     data = r.json()
     articles = []
+
     for a in data.get("articles", []):
+        title = a.get("title", "")
+        summary = a.get("description", "")
         articles.append({
-            "title": a.get("title", ""),
-            "summary": a.get("description", ""),
+            "title": title,
+            "summary": summary,
             "link": a.get("url", "#"),
             "source": a.get("source", {}).get("name", "NewsAPI"),
-            "published": datetime.now(timezone.utc)
+            "published": datetime.now(timezone.utc),
+            "category": classify_category(title, summary)
         })
     return articles
 
-# =========================
-# MAIN PAGE
-# =========================
+# ================= MAIN PAGE =================
 @app.get("/page", response_class=HTMLResponse)
-def page(source: str = Query("all")):
+def page(category: str = Query("all")):
 
-    rss_news = fetch_rss()
-    api_news = fetch_newsapi()
+    news = fetch_rss() + fetch_newsapi()
+    titles = [n["title"] for n in news]
+    counts = Counter(titles)
 
-    all_news = rss_news + api_news
-
-    # Deduplicate by title
-    titles = [n["title"] for n in all_news]
-    title_count = Counter(titles)
-
-    # Sort by time
-    all_news.sort(key=lambda x: x["published"], reverse=True)
+    news.sort(key=lambda x: x["published"], reverse=True)
 
     cards = ""
-    for n in all_news:
-        if source != "all" and n["source"] != source:
+    for n in news:
+        if category != "all" and n["category"] != category:
             continue
 
-        fire = trending_score(n["title"], title_count[n["title"]])
+        fire = trending_score(counts[n["title"]])
 
         cards += f"""
         <div class="card">
-            <div class="badge">{fire} {n['source']}</div>
+            <div class="badge">{fire} {n['category']} • {n['source']}</div>
             <h2>{n['title']}</h2>
             <p>{n['summary']}</p>
             <div class="footer">
@@ -125,97 +139,38 @@ def page(source: str = Query("all")):
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
         <style>
-            body {{
-                margin: 0;
-                font-family: Inter, sans-serif;
-                background: #0f172a;
-                color: #e5e7eb;
-            }}
-            header {{
-                padding: 16px;
-                text-align: center;
-                font-size: 22px;
-                font-weight: 700;
-                background: #020617;
-            }}
-            .filters {{
-                display: flex;
-                gap: 8px;
-                padding: 10px;
-                overflow-x: auto;
-                background: #020617;
-            }}
-            .btn {{
-                padding: 8px 14px;
-                background: #1e293b;
-                border-radius: 20px;
-                font-size: 14px;
-                cursor: pointer;
-                white-space: nowrap;
-            }}
-            .btn.active {{
-                background: #38bdf8;
-                color: #020617;
-                font-weight: 600;
-            }}
-            .container {{
-                padding: 14px;
-            }}
-            .card {{
-                background: #020617;
-                border-radius: 16px;
-                padding: 16px;
-                margin-bottom: 14px;
-                box-shadow: 0 10px 20px rgba(0,0,0,0.4);
-            }}
-            .badge {{
-                font-size: 12px;
-                margin-bottom: 6px;
-                color: #a78bfa;
-                font-weight: 600;
-            }}
-            h2 {{
-                font-size: 18px;
-                line-height: 1.3;
-            }}
-            p {{
-                font-size: 14px;
-                color: #cbd5f5;
-            }}
-            .footer {{
-                display: flex;
-                justify-content: space-between;
-                margin-top: 10px;
-                font-size: 12px;
-                color: #94a3b8;
-            }}
-            a {{
-                color: #38bdf8;
-                text-decoration: none;
-                font-weight: 600;
-            }}
+            body {{ background:#0f172a;color:#e5e7eb;font-family:Inter;margin:0 }}
+            header {{ padding:16px;text-align:center;font-size:22px;font-weight:700;background:#020617 }}
+            .filters {{ display:flex;gap:8px;padding:10px;overflow-x:auto;background:#020617 }}
+            .btn {{ padding:8px 14px;background:#1e293b;border-radius:20px;font-size:14px;cursor:pointer }}
+            .container {{ padding:14px }}
+            .card {{ background:#020617;border-radius:16px;padding:16px;margin-bottom:14px }}
+            .badge {{ font-size:12px;color:#a78bfa;margin-bottom:6px }}
+            h2 {{ font-size:18px }}
+            p {{ font-size:14px;color:#cbd5f5 }}
+            .footer {{ display:flex;justify-content:space-between;font-size:12px;color:#94a3b8 }}
+            a {{ color:#38bdf8;text-decoration:none;font-weight:600 }}
         </style>
 
         <script>
-            function filter(src) {{
-                window.location = "/page?source=" + src;
+            function filter(cat) {{
+                window.location = "/page?category=" + cat;
             }}
-            setTimeout(() => {{
-                location.reload();
-            }}, 60000);
+            setTimeout(()=>location.reload(),60000);
         </script>
     </head>
 
     <body>
-        <header>TrendScope</header>
+        <header>TrendScope AI</header>
 
         <div class="filters">
-            <div class="btn active" onclick="filter('all')">🔥 All</div>
-            <div class="btn" onclick="filter('Hindustan Times')">HT</div>
-            <div class="btn" onclick="filter('Times of India')">TOI</div>
-            <div class="btn" onclick="filter('The Hindu')">Hindu</div>
-            <div class="btn" onclick="filter('NDTV')">NDTV</div>
-            <div class="btn" onclick="filter('India Today')">India Today</div>
+            <div class="btn" onclick="filter('all')">🔥 All</div>
+            <div class="btn" onclick="filter('Politics')">🏛 Politics</div>
+            <div class="btn" onclick="filter('Tech')">💻 Tech</div>
+            <div class="btn" onclick="filter('Sports')">⚽ Sports</div>
+            <div class="btn" onclick="filter('Entertainment')">🎬 Entertainment</div>
+            <div class="btn" onclick="filter('Business')">💼 Business</div>
+            <div class="btn" onclick="filter('World')">🌍 World</div>
         </div>
 
         <div class="container">
@@ -226,4 +181,3 @@ def page(source: str = Query("all")):
     """
 
     return html
-
