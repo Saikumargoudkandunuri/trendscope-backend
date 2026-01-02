@@ -1,14 +1,16 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 import feedparser, requests, os, datetime
-from openai import OpenAI
+import google.generativeai as genai
 from datetime import timezone
 
 # -------------------------------------------------
 # APP INIT
 # -------------------------------------------------
 app = FastAPI()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")
+
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
 # -------------------------------------------------
@@ -24,45 +26,47 @@ RSS_SOURCES = {
 # -------------------------------------------------
 # AI HELPERS
 # -------------------------------------------------
+# -------------------------------------------------
+# AI HELPERS (GEMINI – FREE)
+# -------------------------------------------------
+
 def ai_short_news(text):
-    return client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Summarize in 5–10 very simple words."},
-            {"role": "user", "content": text}
-        ]
-    ).choices[0].message.content.strip()
+    try:
+        r = model.generate_content(
+            f"Summarize this news in 5 to 10 very simple words:\n{text}"
+        )
+        return r.text.strip()
+    except:
+        return "Summary unavailable"
 
 def ai_caption(text):
-    return client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Write a clean Instagram caption."},
-            {"role": "user", "content": text}
-        ]
-    ).choices[0].message.content.strip()
+    try:
+        r = model.generate_content(
+            f"Write a short, clean Instagram caption for this news:\n{text}"
+        )
+        return r.text.strip()
+    except:
+        return "Caption unavailable"
 
 def ai_category(text):
-    return client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Classify into Politics, Tech, Sports, Business, World, Entertainment."},
-            {"role": "user", "content": text}
-        ]
-    ).choices[0].message.content.strip()
+    try:
+        r = model.generate_content(
+            f"Classify this news into one category only: Politics, Tech, Sports, Business, World, Entertainment.\n{text}"
+        )
+        return r.text.strip()
+    except:
+        return "General"
 
 def ai_trending_score(title):
     try:
-        r = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Rate how trending this headline is from 0–100. Reply ONLY number."},
-                {"role": "user", "content": title}
-            ]
+        r = model.generate_content(
+            f"Rate how trending this headline is from 0 to 100. Reply with ONLY a number:\n{title}"
         )
-        return ''.join(c for c in r.choices[0].message.content if c.isdigit()) or "0"
+        score = ''.join(c for c in r.text if c.isdigit())
+        return score if score else "0"
     except:
         return "0"
+
 
 # -------------------------------------------------
 # FETCH NEWS
