@@ -53,11 +53,9 @@ def ai_category(text):
 def ai_trending_score(title):
     score = 20
     title_l = title.lower()
-
     for k in TREND_KEYWORDS:
         if k in title_l:
             score += 10
-
     return str(min(score, 95))
 
 def trend_color(score):
@@ -65,13 +63,12 @@ def trend_color(score):
         s = int(score)
     except:
         return "#666"
-
     if s >= 70:
-        return "#d32f2f"   # red
+        return "#d32f2f"
     elif s >= 40:
-        return "#f57c00"   # orange
+        return "#f57c00"
     else:
-        return "#666"      # gray
+        return "#666"
 
 # -------------------------------------------------
 # FETCH NEWS
@@ -85,7 +82,6 @@ def fetch_news(source_filter=None):
     for source, url in RSS_SOURCES.items():
         if source_filter and source != source_filter:
             continue
-
         feed = feedparser.parse(url)
         for e in feed.entries[:10]:
             article = {
@@ -94,7 +90,8 @@ def fetch_news(source_filter=None):
                 "summary": e.get("summary", e.title),
                 "link": e.link,
                 "source": source,
-                "trend": ai_trending_score(e.title)
+                "trend": ai_trending_score(e.title),
+                "category": ai_category(e.get("summary", e.title))
             }
             NEWS_CACHE[idx] = article
             articles.append(article)
@@ -113,7 +110,8 @@ def fetch_news(source_filter=None):
                 "summary": a.get("description", a["title"]),
                 "link": a["url"],
                 "source": a["source"]["name"],
-                "trend": ai_trending_score(a["title"])
+                "trend": ai_trending_score(a["title"]),
+                "category": ai_category(a.get("description", a["title"]))
             }
             NEWS_CACHE[idx] = article
             articles.append(article)
@@ -125,26 +123,49 @@ def fetch_news(source_filter=None):
 # HOME UI
 # -------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-def home(source: str = Query(None)):
+def home(source: str = Query(None), category: str = Query(None)):
     news = fetch_news(source)
 
     # 🔥 SORT BY TRENDING
     news.sort(key=lambda x: int(x["trend"]), reverse=True)
+
+    if category:
+        news = [n for n in news if n["category"] == category]
 
     html = """
     <html>
     <head>
         <title>TrendScope</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <script>
+        function toggleMode() {
+            document.body.classList.toggle("dark");
+        }
+        </script>
+
         <style>
             body { font-family: Arial; background:#fff; color:#000; max-width:800px; margin:auto; padding:20px; }
+            body.dark { background:#000; color:#fff; }
+            body.dark a { color:#fff; }
             a { text-decoration:none; color:#000; }
             .box { padding:12px; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }
             .trend { font-weight:bold; }
+            .tabs a { margin-right:10px; font-weight:bold; }
         </style>
     </head>
     <body>
+
     <h2>📰 TrendScope</h2>
+    <button onclick="toggleMode()">🌙 Toggle</button>
+
+    <div class="tabs" style="margin:15px 0;">
+        <a href="/">All</a>
+        <a href="/?category=Politics">Politics</a>
+        <a href="/?category=Tech">Tech</a>
+        <a href="/?category=Sports">Sports</a>
+        <a href="/?category=Business">Business</a>
+    </div>
     """
 
     for n in news:
@@ -196,6 +217,14 @@ def news_page(news_id: int):
 
         <button onclick="window.open('{item['link']}', '_blank')">
             🔗 Open Full News
+        </button>
+
+        <button onclick="navigator.share({{
+            title: '{item['title']}',
+            text: '{short}',
+            url: '{item['link']}'
+        }})">
+            📤 Share
         </button>
     </body>
     </html>
