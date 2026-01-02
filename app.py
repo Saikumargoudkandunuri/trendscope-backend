@@ -15,46 +15,84 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 # -------------------------------------------------
 NEWS_CACHE = {}
 
+# -------------------------------------------------
+# INDIA-HEAVY RSS SOURCES (≈80% INDIA)
+# -------------------------------------------------
 RSS_SOURCES = {
-    "HT": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
-    "TOI": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+    # Major Indian News
+    "Hindustan Times": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
+    "Times of India": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+    "The Hindu": "https://www.thehindu.com/news/national/feeder/default.rss",
+    "Indian Express": "https://indianexpress.com/feed/",
+    "NDTV": "https://feeds.feedburner.com/ndtvnews-india-news",
+    "News18": "https://www.news18.com/rss/india.xml",
+    "Deccan Herald": "https://www.deccanherald.com/rss/india.rss",
+    "ANI": "https://aninews.in/rss/national/general.xml",
+
+    # Business (India)
+    "Economic Times": "https://economictimes.indiatimes.com/rssfeedstopstories.cms",
+    "Business Standard": "https://www.business-standard.com/rss/latest.rss",
+    "LiveMint": "https://www.livemint.com/rss/news",
+
+    # Government / Official
+    "PIB": "https://pib.gov.in/rssfeed.aspx",
+
+    # Limited Global (≈20%)
+    "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
 }
 
 # -------------------------------------------------
 # TREND LOGIC (FREE + STABLE)
 # -------------------------------------------------
 TREND_KEYWORDS = [
-    "breaking", "election", "budget", "crisis", "attack", "launch",
-    "ai", "ipo", "war", "court", "policy", "startup", "india", "modi",
-    "stock", "market", "tech", "google", "apple", "microsoft"
+    "breaking", "india", "government", "modi", "budget", "election",
+    "court", "supreme court", "policy", "attack", "crisis",
+    "market", "stock", "ipo", "economy",
+    "ai", "technology", "startup", "launch", "isro",
+    "cricket", "match", "team india", "tournament"
 ]
 
+# -------------------------------------------------
+# CONTENT GENERATION (IMPROVED QUALITY)
+# -------------------------------------------------
 def ai_short_news(text):
+    """
+    18–25 words, clean, human-readable (Inshorts-style)
+    """
     words = re.findall(r"\w+", text)
-    return " ".join(words[:8])
+    short = " ".join(words[:22])
+    return short + "."
 
 def ai_caption(text):
+    """
+    Instagram-ready caption (longer, viral friendly)
+    """
     short = ai_short_news(text)
-    return f"{short} 🔥 #Trending #News"
+    return (
+        f"{short}\n\n"
+        "📢 Stay informed in seconds, not minutes.\n"
+        "Follow for daily trending updates 🇮🇳\n\n"
+        "#IndiaNews #TrendingNow #BreakingNews #DailyUpdates #NewsInShort"
+    )
 
 def ai_category(text):
     t = text.lower()
-    if any(k in t for k in ["election", "government", "policy", "modi"]):
+    if any(k in t for k in ["election", "government", "policy", "modi", "minister"]):
         return "Politics"
-    if any(k in t for k in ["market", "stock", "ipo", "economy"]):
+    if any(k in t for k in ["market", "stock", "ipo", "economy", "business"]):
         return "Business"
-    if any(k in t for k in ["ai", "tech", "google", "apple"]):
+    if any(k in t for k in ["ai", "tech", "isro", "startup", "launch"]):
         return "Tech"
-    if any(k in t for k in ["match", "cricket", "football", "tournament"]):
+    if any(k in t for k in ["cricket", "match", "team", "tournament", "sports"]):
         return "Sports"
-    return "General"
+    return "India"
 
 def ai_trending_score(title):
-    score = 20
+    score = 25
     title_l = title.lower()
     for k in TREND_KEYWORDS:
         if k in title_l:
-            score += 10
+            score += 8
     return str(min(score, 95))
 
 def trend_color(score):
@@ -69,7 +107,7 @@ def trend_color(score):
 # -------------------------------------------------
 # FETCH NEWS
 # -------------------------------------------------
-def fetch_news(source_filter=None):
+def fetch_news():
     global NEWS_CACHE
     NEWS_CACHE = {}
     articles = []
@@ -77,7 +115,7 @@ def fetch_news(source_filter=None):
 
     for source, url in RSS_SOURCES.items():
         feed = feedparser.parse(url)
-        for e in feed.entries[:10]:
+        for e in feed.entries[:6]:
             article = {
                 "id": idx,
                 "title": e.title,
@@ -86,26 +124,6 @@ def fetch_news(source_filter=None):
                 "source": source,
                 "trend": ai_trending_score(e.title),
                 "category": ai_category(e.get("summary", e.title))
-            }
-            NEWS_CACHE[idx] = article
-            articles.append(article)
-            idx += 1
-
-    if NEWSAPI_KEY:
-        r = requests.get(
-            "https://newsapi.org/v2/top-headlines?country=in",
-            headers={"X-Api-Key": NEWSAPI_KEY}
-        ).json()
-
-        for a in r.get("articles", [])[:10]:
-            article = {
-                "id": idx,
-                "title": a["title"],
-                "summary": a.get("description", a["title"]),
-                "link": a["url"],
-                "source": a["source"]["name"],
-                "trend": ai_trending_score(a["title"]),
-                "category": ai_category(a.get("description", a["title"]))
             }
             NEWS_CACHE[idx] = article
             articles.append(article)
@@ -129,7 +147,6 @@ def home(category: str = Query(None)):
     <head>
         <title>TrendScope</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
         <style>
             body {
                 font-family: 'Segoe UI', sans-serif;
@@ -172,14 +189,15 @@ def home(category: str = Query(None)):
     </head>
     <body>
 
-    <h1>📰 TrendScope</h1>
+    <h1>🇮🇳 TrendScope India</h1>
 
     <div class="tabs">
         <a href="/">All</a>
+        <a href="/?category=India">India</a>
         <a href="/?category=Politics">Politics</a>
         <a href="/?category=Tech">Tech</a>
-        <a href="/?category=Sports">Sports</a>
         <a href="/?category=Business">Business</a>
+        <a href="/?category=Sports">Sports</a>
     </div>
     """
 
@@ -197,7 +215,7 @@ def home(category: str = Query(None)):
     return html
 
 # -------------------------------------------------
-# DETAIL PAGE (BEAUTIFUL)
+# DETAIL PAGE
 # -------------------------------------------------
 @app.get("/news/{news_id}", response_class=HTMLResponse)
 def news_page(news_id: int):
@@ -225,17 +243,14 @@ def news_page(news_id: int):
                 color: #212121;
                 border-radius: 16px;
                 padding: 20px;
-                max-width: 600px;
+                max-width: 650px;
                 margin: auto;
                 box-shadow: 0 10px 25px rgba(0,0,0,0.3);
             }}
-            h2 {{
-                font-weight: 800;
-                margin-bottom: 10px;
-            }}
+            h2 {{ font-weight: 800; }}
             textarea {{
                 width: 100%;
-                height: 80px;
+                height: 110px;
                 border-radius: 10px;
                 padding: 10px;
                 border: none;
@@ -253,11 +268,7 @@ def news_page(news_id: int):
                 background: #3949ab;
                 color: white;
             }}
-            a {{
-                color: #bbdefb;
-                text-decoration: none;
-                font-weight: 600;
-            }}
+            a {{ color: #bbdefb; text-decoration: none; font-weight: 600; }}
         </style>
     </head>
     <body>
@@ -265,7 +276,7 @@ def news_page(news_id: int):
 
         <div class="box">
             <h2>{item['title']}</h2>
-            <p><b>Category:</b> {category}</p>
+            <p><b>Category:</b> {category} | <b>Source:</b> {item['source']}</p>
 
             <p><b>Short News</b></p>
             <textarea readonly>{short}</textarea>
@@ -274,7 +285,7 @@ def news_page(news_id: int):
             <textarea readonly>{caption}</textarea>
 
             <button onclick="window.open('{item['link']}', '_blank')">
-                🔗 Open Full News
+                🔗 Read Full Article
             </button>
 
             <button onclick="navigator.share({{
@@ -294,4 +305,4 @@ def news_page(news_id: int):
 # -------------------------------------------------
 @app.get("/health")
 def health():
-    return {"message": "TrendScope MVP API is running"}
+    return {"message": "TrendScope India is running"}
