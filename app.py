@@ -6,6 +6,33 @@ from datetime import timezone
 
 # Initialize FastAPI and OpenAI
 app = FastAPI()
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def force_ui_root():
+    return """
+    <html>
+    <head>
+        <title>TrendScope UI</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {
+                background: #fff;
+                color: #000;
+                font-family: Arial, sans-serif;
+                padding: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>📰 TrendScope UI</h2>
+        <p>If you see this on mobile, routing is FIXED.</p>
+        <p><a href="/health">API Health</a></p>
+    </body>
+    </html>
+    """
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
