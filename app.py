@@ -2,12 +2,15 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 import feedparser, requests, os, datetime
 from openai import OpenAI
+from datetime import timezone
 
-NEWS_CACHE = {}
-
+# Initialize FastAPI and OpenAI
 app = FastAPI()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
+
+# Global cache for the session
+NEWS_CACHE = {}
 
 RSS_SOURCES = {
     "HT": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
@@ -17,6 +20,7 @@ RSS_SOURCES = {
 # -----------------------------
 # UTILITIES
 # -----------------------------
+
 def ai_category(text):
     r = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -47,149 +51,149 @@ def ai_caption(text):
     )
     return r.choices[0].message.content.strip()
 
-def trending_score(published):
+def trending_score_visual(published_dt):
+    """Returns fire emojis based on how recent the news is."""
     score = 1
-    if published:
-        delta = datetime.datetime.now() - published
-        if delta.total_seconds() < 3600:
+    if published_dt:
+        now = datetime.datetime.now(timezone.utc)
+        delta = now - published_dt
+        if delta.total_seconds() < 3600:  # Less than 1 hour old
             score += 2
+        elif delta.total_seconds() < 10800: # Less than 3 hours old
+            score += 1
     return "🔥" * score
 
-    def ai_trending_score(title: str):
-    """
-    Returns a trending percentage (0–100) for a news headline
-    """
+def ai_trending_score(title: str):
+    """Returns a trending percentage (0–100) using AI."""
     try:
         r = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a news trend analyst. "
-                        "Rate how trending this headline is right now "
-                        "on a scale of 0 to 100. "
-                        "Respond with ONLY the number."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": title
-                }
+                {"role": "system", "content": "You are a news trend analyst. Rate how trending this headline is (0-100). Respond with ONLY the number."},
+                {"role": "user", "content": title}
             ]
         )
-
         score = r.choices[0].message.content.strip()
-        score = ''.join(c for c in score if c.isdigit())
-
-        return score if score else "0"
-
+        return ''.join(c for c in score if c.isdigit()) or "0"
     except:
         return "0"
-
 
 # -----------------------------
 # AGGREGATION
 # -----------------------------
 
+
+
 def fetch_news(source_filter=None):
     global NEWS_CACHE
-    NEWS_CACHE = {}
+    NEWS_CACHE = {} # Resetting cache for the demo; in production use a DB
     articles = []
     idx = 0
 
+    # 1. Process RSS Sources
     for source, url in RSS_SOURCES.items():
         if source_filter and source != source_filter:
             continue
         feed = feedparser.parse(url)
         for e in feed.entries[:10]:
-            article = {
-    "id": idx,
-    "title": e.title,
-    "summary": e.get("summary", e.title),
-    "link": e.link,
-    "source": source,
-    "trend": ai_trending_score(e.title)
-}
-
-            articles.append(article)
-            NEWS_CACHE[idx] = article
-            idx += 1
-
-    if NEWSAPI_KEY:
-        r = requests.get(
-            "https://newsapi.org/v2/top-headlines?country=in",
-            headers={"X-Api-Key": NEWSAPI_KEY}
-        ).json()
-
-        for a in r.get("articles", [])[:10]:
+            # Parse RSS date to datetime object
+            pub_dt = datetime.datetime(*e.published_parsed[:6], tzinfo=timezone.utc) if hasattr(e, 'published_parsed') else None
+            
             article = {
                 "id": idx,
-                "title": a["title"],
-                "summary": a.get("description", a["title"]),
-                "link": a["url"],
-                "source": a["source"]["name"]
+                "title": e.title,
+                "summary": e.get("summary", e.title),
+                "link": e.link,
+                "source": source,
+                "published": pub_dt,
+                "trend_ai": ai_trending_score(e.title)
             }
             articles.append(article)
             NEWS_CACHE[idx] = article
             idx += 1
 
+    # 2. Process NewsAPI Source
+    if NEWSAPI_KEY and not (source_filter and source_filter not in ["HT", "TOI"]):
+        try:
+            r = requests.get(
+                f"https://newsapi.org/v2/top-headlines?country=in&apiKey={NEWSAPI_KEY}"
+            ).json()
+
+            for a in r.get("articles", [])[:10]:
+                # Parse ISO date string to datetime object
+                pub_date_str = a.get("publishedAt")
+                pub_dt = datetime.datetime.fromisoformat(pub_date_str.replace('Z', '+00:00')) if pub_date_str else None
+
+                article = {
+                    "id": idx,
+                    "title": a["title"],
+                    "summary": a.get("description", a["title"]) or "No summary available.",
+                    "link": a["url"],
+                    "source": a["source"]["name"],
+                    "published": pub_dt,
+                    "trend_ai": ai_trending_score(a["title"])
+                }
+                articles.append(article)
+                NEWS_CACHE[idx] = article
+                idx += 1
+        except Exception as err:
+            print(f"NewsAPI Error: {err}")
+
     return articles
 
+# -----------------------------
+# ROUTES
+# -----------------------------
 
-# -----------------------------
-# HOME PAGE
-# -----------------------------
 @app.get("/", response_class=HTMLResponse)
 def home(source: str = Query(None)):
-    news = fetch_news(source)
+    news_list = fetch_news(source)
 
-    html = """
+    html = f"""
     <html>
     <head>
         <title>TrendScope</title>
-        <meta http-equiv="refresh" content="60">
+        <meta http-equiv="refresh" content="300">
         <style>
-            body { background:#fff; color:#000; font-family:Arial; }
-            a { color:#000; text-decoration:none; }
-            .box { padding:10px; border-bottom:1px solid #ddd; }
-            .tag { font-size:12px; color:#555; }
+            body {{ background:#fff; color:#000; font-family:sans-serif; max-width: 800px; margin: auto; padding: 20px; }}
+            a {{ color:#000; text-decoration:none; }}
+            .box {{ padding:15px; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }}
+            .tag {{ font-size:12px; color:#666; }}
+            .nav {{ margin-bottom: 20px; padding: 10px; background: #f4f4f4; border-radius: 5px; }}
         </style>
     </head>
     <body>
     <h2>TrendScope</h2>
-    <p>
-        <a href="/">All</a> |
-        <a href="/?source=HT">HT</a> |
-        <a href="/?source=TOI">TOI</a>
-    </p>
+    <div class="nav">
+        <a href="/">All</a> | 
+        <a href="/?source=HT">Hindustan Times</a> | 
+        <a href="/?source=TOI">Times of India</a>
+    </div>
     """
 
-    for i, n in enumerate(news):
+    for n in news_list:
+        fire_icons = trending_score_visual(n['published'])
         html += f"""
-        <div class="box" style="display:flex; justify-content:space-between; align-items:center;">
-            <a href="/news/{n['id']}">
-
-                <b>{n['title']}</b>
-            </a><br>
-            <span class="tag">{n['source']} {trending_score(n['published'])}</span>
+        <div class="box">
+            <div style="flex: 1;">
+                <a href="/news/{n['id']}"><b>{n['title']}</b></a><br>
+                <span class="tag">{n['source']} | AI Trend: {n['trend_ai']}%</span>
+            </div>
+            <div style="font-size: 20px;">{fire_icons}</div>
         </div>
         """
 
-    html += """
-    </body>
-    </html>
-    """
-
+    html += "</body></html>"
     return html
 
-@app.get("/news/{news_id}", response_class=HTMLResponse)
+@app.get("/news/{{news_id}}", response_class=HTMLResponse)
 def news_page(news_id: int):
     item = NEWS_CACHE.get(news_id)
 
     if not item:
-        return "<h2>Detail not found. Go back.</h2>"
+        return "<h2>Detail not found. <a href='/'>Go back</a></h2>"
 
+    # AI Processing
     short = ai_short_news(item["summary"])
     caption = ai_caption(item["summary"])
     category = ai_category(item["summary"])
@@ -199,29 +203,24 @@ def news_page(news_id: int):
     <head>
         <title>{item['title']}</title>
         <style>
-            body {{ background:#000; color:#fff; font-family:Arial; }}
-            textarea {{ width:100%; height:80px; }}
-            button {{ padding:10px; margin:5px; }}
-            a {{ color:#ccc; }}
+            body {{ background:#111; color:#eee; font-family:sans-serif; max-width: 600px; margin: auto; padding: 20px; }}
+            textarea {{ width:100%; height:100px; background:#222; color:#0f0; border:1px solid #444; padding:10px; margin-bottom:20px; }}
+            button {{ padding:12px 20px; background:#007bff; color:white; border:none; cursor:pointer; border-radius:5px; }}
+            a {{ color:#aaa; }}
         </style>
     </head>
     <body>
+        <a href="/">⬅ Back to Feed</a>
         <h3>{item['title']}</h3>
+        <p><b>Category:</b> <span style="color:#007bff">{category}</span></p>
 
-        <p><b>Category:</b> {category}</p>
-
-        <p><b>Short News (5–10 words)</b></p>
+        <p><b>Short News (Instagram Style)</b></p>
         <textarea readonly>{short}</textarea>
 
-        <p><b>Instagram Description</b></p>
+        <p><b>Suggested Caption</b></p>
         <textarea readonly>{caption}</textarea>
 
-        <button onclick="window.open('{item['link']}', '_blank')">
-            🔗 Open Full News
-        </button>
-
-        <br><br>
-        <a href="/">⬅ Back</a>
+        <button onclick="window.open('{item['link']}', '_blank')">🔗 Read Full Article</button>
     </body>
     </html>
     """
