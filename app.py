@@ -265,7 +265,6 @@ def news_page(news_id: int):
     </body>
     </html>
     """
-
-    @app.get("/health")
+@app.get("/health")
 def health():
     return {"message": "TrendScope MVP API is running"}
