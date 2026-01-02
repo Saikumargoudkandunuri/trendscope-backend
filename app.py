@@ -9,7 +9,7 @@ from datetime import timezone
 # -------------------------------------------------
 app = FastAPI()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-pro")
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
