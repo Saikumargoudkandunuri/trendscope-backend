@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>TrendScope</title>
+</head>
+<body>
+  <h1>TrendScope – Live News</h1>
+  <button onclick="loadNews()">Load News</button>
+  <div id="news"></div>
+
+  <script>
+    function loadNews() {
+      fetch("http://127.0.0.1:8000/news")
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById("news").innerHTML = "";
+          data.forEach(item => {
+            document.getElementById("news").innerHTML += 
+              `<p>📰 ${item.title}</p>`;
+          });
+        });
+    }
+  </script>
+</body>
+</html>
