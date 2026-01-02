@@ -1,49 +1,94 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
-import requests
 import feedparser
 import hashlib
 from datetime import datetime, timezone
+import os
 
+# ================== CHOOSE AI ==================
+USE_OPENAI = True   # set False if using Gemini
+
+# ---------- OpenAI ----------
+if USE_OPENAI:
+   python
+import os
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ---------- Gemini ----------
+if not USE_OPENAI:
+    import google.generativeai as genai
+    genai.configure(api_key="YOUR_GEMINI_API_KEY")
+    model = genai.GenerativeModel("gemini-pro")
+
+# ================= APP =================
 app = FastAPI()
-
-NEWS_API_KEY = "5b8cdcf858a1405b87ac7fbe53ae86f6"
 
 RSS_SOURCES = {
     "Hindustan Times": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
     "Times of India": "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
-    "The Hindu": "https://www.thehindu.com/news/national/feeder/default.rss",
     "NDTV": "https://feeds.feedburner.com/ndtvnews-india-news"
 }
 
-# ---------------- AI LOGIC ----------------
+# ================= AI FUNCTIONS =================
 
-def ai_short_summary(title):
-    words = title.split()
-    return " ".join(words[:8]) + "…"
+def ai_summary(text):
+    prompt = f"Summarize this news in 5 to 10 simple words:\n{text}"
 
-def ai_instagram_caption(title, source):
-    return f"{title}\n\n🔥 Breaking | Source: {source}\n#news #trending #viral #india"
+    if USE_OPENAI:
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20
+        )
+        return r.choices[0].message.content.strip()
 
-# ---------------- FETCH NEWS ----------------
+    else:
+        return model.generate_content(prompt).text.strip()
+
+
+def ai_meme_caption(text):
+    prompt = f"""
+Create a short, funny meme-style Instagram caption for this news.
+Use casual Indian tone. No emojis overload.
+
+News:
+{text}
+"""
+
+    if USE_OPENAI:
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=80
+        )
+        return r.choices[0].message.content.strip()
+
+    else:
+        return model.generate_content(prompt).text.strip()
+
+
+def ai_normal_caption(title, source):
+    return f"{title}\n\nSource: {source}\n#news #india #breaking #viral"
+
+# ================= FETCH NEWS =================
 
 def fetch_news():
-    news = []
+    items = []
     for source, url in RSS_SOURCES.items():
         feed = feedparser.parse(url)
-        for e in feed.entries[:15]:
+        for e in feed.entries[:20]:
             uid = hashlib.md5(e.title.encode()).hexdigest()
-            news.append({
+            items.append({
                 "id": uid,
                 "title": e.title,
-                "summary": e.get("summary", ""),
                 "link": e.link,
-                "source": source,
-                "published": datetime.now(timezone.utc)
+                "source": source
             })
-    return news
+    return items
 
-# ---------------- HOME PAGE ----------------
+# ================= HOME =================
 
 @app.get("/page", response_class=HTMLResponse)
 def home():
@@ -54,7 +99,7 @@ def home():
         cards += f"""
         <div class="card" onclick="openNews('{n['id']}')">
             <h2>{n['title']}</h2>
-            <span class="src">{n['source']}</span>
+            <span>{n['source']}</span>
         </div>
         """
 
@@ -66,30 +111,24 @@ def home():
             body {{ background:#0f172a;color:#e5e7eb;font-family:Inter;margin:0 }}
             header {{ padding:16px;text-align:center;font-size:22px;font-weight:700;background:#020617 }}
             .container {{ padding:14px }}
-            .card {{
-                background:#020617;
-                padding:16px;
-                border-radius:14px;
-                margin-bottom:12px;
-                cursor:pointer;
-            }}
+            .card {{ background:#020617;padding:16px;border-radius:14px;margin-bottom:12px;cursor:pointer }}
             h2 {{ font-size:17px }}
-            .src {{ font-size:12px;color:#94a3b8 }}
+            span {{ font-size:12px;color:#94a3b8 }}
         </style>
         <script>
             function openNews(id) {{
-                window.location = "/news?id=" + id;
+                location.href = "/news?id=" + id;
             }}
         </script>
     </head>
     <body>
-        <header>TrendScope</header>
+        <header>TrendScope AI</header>
         <div class="container">{cards}</div>
     </body>
     </html>
     """
 
-# ---------------- DETAIL PAGE ----------------
+# ================= DETAIL PAGE =================
 
 @app.get("/news", response_class=HTMLResponse)
 def news_detail(id: str):
@@ -99,8 +138,9 @@ def news_detail(id: str):
     if not item:
         return "<h3>News not found</h3>"
 
-    short = ai_short_summary(item["title"])
-    caption = ai_instagram_caption(item["title"], item["source"])
+    short = ai_summary(item["title"])
+    meme = ai_meme_caption(item["title"])
+    caption = ai_normal_caption(item["title"], item["source"])
 
     return f"""
     <html>
@@ -110,42 +150,36 @@ def news_detail(id: str):
             body {{ background:#0f172a;color:#e5e7eb;font-family:Inter;margin:0 }}
             header {{ padding:16px;text-align:center;font-size:20px;font-weight:700;background:#020617 }}
             .box {{ padding:16px }}
-            .card {{
-                background:#020617;
-                padding:16px;
-                border-radius:14px;
-                margin-bottom:14px;
-            }}
-            .btn {{
-                display:block;
-                text-align:center;
-                padding:12px;
-                margin-top:10px;
-                border-radius:10px;
-                text-decoration:none;
-                font-weight:600;
-            }}
-            .open {{ background:#38bdf8;color:#020617 }}
+            .card {{ background:#020617;padding:16px;border-radius:14px;margin-bottom:14px }}
+            .btn {{ padding:12px;border-radius:10px;margin-top:8px;text-align:center;font-weight:600;cursor:pointer }}
             .copy {{ background:#a78bfa;color:#020617 }}
+            .open {{ background:#38bdf8;color:#020617;text-decoration:none;display:block }}
         </style>
         <script>
             function copyText(text) {{
                 navigator.clipboard.writeText(text);
-                alert("Copied for Instagram!");
+                alert("Copied!");
             }}
         </script>
     </head>
+
     <body>
-        <header>News for Instagram</header>
+        <header>Instagram Ready</header>
 
         <div class="box">
             <div class="card">
-                <b>Short AI Summary</b>
+                <b>AI Short Summary</b>
                 <p>{short}</p>
             </div>
 
             <div class="card">
-                <b>Instagram Caption</b>
+                <b>Meme Caption</b>
+                <p>{meme}</p>
+                <div class="btn copy" onclick="copyText(`{meme}`)">📋 Copy Meme Caption</div>
+            </div>
+
+            <div class="card">
+                <b>Normal Caption</b>
                 <p>{caption}</p>
                 <div class="btn copy" onclick="copyText(`{caption}`)">📋 Copy Caption</div>
             </div>
