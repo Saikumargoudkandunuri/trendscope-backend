@@ -4,3 +4,8 @@ requests
 feedparser
 openai
 google-generativeai
+fastapi
+uvicorn
+feedparser
+requests
+google-generativeai
