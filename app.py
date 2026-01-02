@@ -195,3 +195,18 @@ def news_page(news_id: int):
 @app.get("/health")
 def health():
     return {"message": "TrendScope MVP API is running"}
+
+
+@app.get("/debug-gemini")
+def debug_gemini():
+    try:
+        r = model.generate_content("Reply with number 42 only")
+        return {
+            "gemini_response": r.text,
+            "status": "Gemini working"
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "status": "Gemini failed"
+        }
