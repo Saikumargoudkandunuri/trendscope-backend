@@ -10,7 +10,6 @@ USE_OPENAI = True   # set False if using Gemini
 
 # ---------- OpenAI ----------
 if USE_OPENAI:
-   python
 import os
 from openai import OpenAI
 
