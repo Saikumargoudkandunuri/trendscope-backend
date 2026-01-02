@@ -4,39 +4,42 @@ import requests
 
 app = FastAPI()
 
-# 🔑 REPLACE WITH YOUR NEWS API KEY
+# 🔑 PUT YOUR REAL NEWS API KEY HERE
 NEWS_API_KEY = "5b8cdcf858a1405b87ac7fbe53ae86f6"
 
-NEWS_URL = (
-    "https://newsapi.org/v2/top-headlines"
-    "?country=in"
-    f"&apiKey={NEWS_API_KEY}"
-)
+BASE_URL = "https://newsapi.org/v2/top-headlines"
+
+def fetch_news(category=None):
+    params = {
+        "country": "in",
+        "apiKey": NEWS_API_KEY,
+        "pageSize": 30
+    }
+    if category:
+        params["category"] = category
+
+    response = requests.get(BASE_URL, params=params)
+    data = response.json()
+    return data.get("articles", [])
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return """
-    <h2 style="font-family:Arial">TrendScope backend is running ✅</h2>
-    <p>Open <b>/page</b> to see news</p>
-    """
+    return "<h2>TrendScope backend running ✅</h2><p>Open /page</p>"
 
 @app.get("/page", response_class=HTMLResponse)
-def news_page():
-    response = requests.get(NEWS_URL)
-    data = response.json()
-    articles = data.get("articles", [])[:20]
+def page():
+    all_news = fetch_news()
 
     cards_html = ""
-
-    for article in articles:
+    for article in all_news:
         title = article.get("title") or "No title"
         desc = article.get("description") or "No description"
         source = article.get("source", {}).get("name", "Source")
         url = article.get("url", "#")
 
         cards_html += f"""
-        <div class="card">
-            <div class="badge">🔥 Viral</div>
+        <div class="card" data-cat="all">
+            <div class="badge">🔥 Trending</div>
             <h2>{title}</h2>
             <p>{desc}</p>
             <div class="card-footer">
@@ -89,6 +92,7 @@ def news_page():
                 border-radius: 20px;
                 font-size: 14px;
                 white-space: nowrap;
+                cursor: pointer;
             }}
 
             .cat.active {{
@@ -147,17 +151,24 @@ def news_page():
                 font-weight: 600;
             }}
         </style>
+
+        <script>
+            function activate(btn) {{
+                document.querySelectorAll('.cat').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+            }}
+        </script>
     </head>
 
     <body>
         <header>TrendScope</header>
 
         <div class="categories">
-            <div class="cat active">🔥 Viral</div>
-            <div class="cat">🎬 Celeb</div>
-            <div class="cat">💻 Tech</div>
-            <div class="cat">⚽ Sports</div>
-            <div class="cat">🏛 Politics</div>
+            <div class="cat active" onclick="activate(this)">🔥 All</div>
+            <div class="cat" onclick="activate(this)">🎬 Celeb</div>
+            <div class="cat" onclick="activate(this)">💻 Tech</div>
+            <div class="cat" onclick="activate(this)">⚽ Sports</div>
+            <div class="cat" onclick="activate(this)">🏛 Politics</div>
         </div>
 
         <div class="container">
@@ -168,4 +179,3 @@ def news_page():
     """
 
     return html
-
