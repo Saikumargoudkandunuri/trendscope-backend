@@ -186,6 +186,47 @@ def home(source: str = Query(None)):
     html += "</body></html>"
     return html
 
+    from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+def home_page():
+    # Force refresh of news cache
+    fetch_news()
+
+    return """
+    <html>
+    <head>
+        <title>TrendScope</title>
+        <meta http-equiv="refresh" content="60">
+        <style>
+            body {
+                background: #fff;
+                color: #000;
+                font-family: Arial, sans-serif;
+                padding: 20px;
+            }
+            a {
+                color: #000;
+                text-decoration: none;
+            }
+            .box {
+                padding: 15px;
+                border-bottom: 1px solid #ddd;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>📰 TrendScope</h2>
+        <p>If you see this page, UI routing is working.</p>
+
+        <div class="box">
+            <a href="/news/0"><b>Tap here to test first news</b></a>
+        </div>
+    </body>
+    </html>
+    """
+
+
 @app.get("/news/{news_id}", response_class=HTMLResponse)
 def news_page(news_id: int):
     item = NEWS_CACHE.get(news_id)
@@ -224,3 +265,7 @@ def news_page(news_id: int):
     </body>
     </html>
     """
+
+    @app.get("/health")
+def health():
+    return {"message": "TrendScope MVP API is running"}
