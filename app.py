@@ -7,20 +7,7 @@ app = FastAPI()
 # 🔑 PUT YOUR REAL NEWS API KEY HERE
 NEWS_API_KEY = "5b8cdcf858a1405b87ac7fbe53ae86f6"
 
-BASE_URL = "https://newsapi.org/v2/top-headlines"
-
-def fetch_news(category=None):
-    params = {
-        "country": "in",
-        "apiKey": NEWS_API_KEY,
-        "pageSize": 30
-    }
-    if category:
-        params["category"] = category
-
-    response = requests.get(BASE_URL, params=params)
-    data = response.json()
-    return data.get("articles", [])
+NEWS_URL = "https://newsapi.org/v2/everything"
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -28,17 +15,31 @@ def home():
 
 @app.get("/page", response_class=HTMLResponse)
 def page():
-    all_news = fetch_news()
+    params = {
+        "q": "india",
+        "language": "en",
+        "sortBy": "publishedAt",
+        "pageSize": 30,
+        "apiKey": NEWS_API_KEY,
+    }
+
+    response = requests.get(NEWS_URL, params=params)
+    data = response.json()
+    articles = data.get("articles", [])
 
     cards_html = ""
-    for article in all_news:
+
+    if not articles:
+        cards_html = "<p style='text-align:center;color:#94a3b8'>No news found</p>"
+
+    for article in articles:
         title = article.get("title") or "No title"
         desc = article.get("description") or "No description"
         source = article.get("source", {}).get("name", "Source")
         url = article.get("url", "#")
 
         cards_html += f"""
-        <div class="card" data-cat="all">
+        <div class="card">
             <div class="badge">🔥 Trending</div>
             <h2>{title}</h2>
             <p>{desc}</p>
@@ -83,7 +84,6 @@ def page():
                 background: #020617;
                 position: sticky;
                 top: 0;
-                z-index: 10;
             }}
 
             .cat {{
@@ -91,7 +91,6 @@ def page():
                 background: #1e293b;
                 border-radius: 20px;
                 font-size: 14px;
-                white-space: nowrap;
                 cursor: pointer;
             }}
 
@@ -133,21 +132,19 @@ def page():
             .card p {{
                 font-size: 14px;
                 color: #cbd5f5;
-                line-height: 1.4;
             }}
 
             .card-footer {{
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
                 margin-top: 12px;
                 font-size: 13px;
                 color: #94a3b8;
             }}
 
             .card-footer a {{
-                text-decoration: none;
                 color: #38bdf8;
+                text-decoration: none;
                 font-weight: 600;
             }}
         </style>
@@ -164,7 +161,7 @@ def page():
         <header>TrendScope</header>
 
         <div class="categories">
-            <div class="cat active" onclick="activate(this)">🔥 All</div>
+            <div class="cat active" onclick="activate(this)">🔥 Trending</div>
             <div class="cat" onclick="activate(this)">🎬 Celeb</div>
             <div class="cat" onclick="activate(this)">💻 Tech</div>
             <div class="cat" onclick="activate(this)">⚽ Sports</div>
@@ -179,3 +176,4 @@ def page():
     """
 
     return html
+
