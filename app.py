@@ -1,15 +1,13 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
-import feedparser, requests, os, datetime
-import google.generativeai as genai
-from datetime import timezone
+import feedparser, requests, os
+from datetime import datetime, timedelta
+import re
 
 # -------------------------------------------------
 # APP INIT
 # -------------------------------------------------
 app = FastAPI()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
@@ -23,9 +21,9 @@ RSS_SOURCES = {
     "TOI": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
 }
 
-import re
-from datetime import datetime, timedelta
-
+# -------------------------------------------------
+# TREND LOGIC (FREE + STABLE)
+# -------------------------------------------------
 TREND_KEYWORDS = [
     "breaking", "election", "budget", "crisis", "attack", "launch",
     "ai", "ipo", "war", "court", "policy", "startup", "india", "modi",
@@ -53,15 +51,27 @@ def ai_category(text):
     return "General"
 
 def ai_trending_score(title):
-    score = 10
+    score = 20
     title_l = title.lower()
 
     for k in TREND_KEYWORDS:
         if k in title_l:
             score += 10
 
-    # cap score
     return str(min(score, 95))
+
+def trend_color(score):
+    try:
+        s = int(score)
+    except:
+        return "#666"
+
+    if s >= 70:
+        return "#d32f2f"   # red
+    elif s >= 40:
+        return "#f57c00"   # orange
+    else:
+        return "#666"      # gray
 
 # -------------------------------------------------
 # FETCH NEWS
@@ -112,11 +122,14 @@ def fetch_news(source_filter=None):
     return articles
 
 # -------------------------------------------------
-# HOME UI (ONLY ONE `/`)
+# HOME UI
 # -------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 def home(source: str = Query(None)):
     news = fetch_news(source)
+
+    # 🔥 SORT BY TRENDING
+    news.sort(key=lambda x: int(x["trend"]), reverse=True)
 
     html = """
     <html>
@@ -126,7 +139,7 @@ def home(source: str = Query(None)):
         <style>
             body { font-family: Arial; background:#fff; color:#000; max-width:800px; margin:auto; padding:20px; }
             a { text-decoration:none; color:#000; }
-            .box { padding:12px; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; }
+            .box { padding:12px; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center; }
             .trend { font-weight:bold; }
         </style>
     </head>
@@ -138,7 +151,9 @@ def home(source: str = Query(None)):
         html += f"""
         <div class="box">
             <a href="/news/{n['id']}"><b>{n['title']}</b></a>
-            <span class="trend">🔥 {n['trend']}%</span>
+            <span class="trend" style="color:{trend_color(n['trend'])}">
+                🔥 {n['trend']}%
+            </span>
         </div>
         """
 
@@ -179,7 +194,9 @@ def news_page(news_id: int):
         <p><b>Instagram Caption</b></p>
         <textarea readonly>{caption}</textarea>
 
-        <button onclick="window.open('{item['link']}', '_blank')">🔗 Open Full News</button>
+        <button onclick="window.open('{item['link']}', '_blank')">
+            🔗 Open Full News
+        </button>
     </body>
     </html>
     """
@@ -190,18 +207,3 @@ def news_page(news_id: int):
 @app.get("/health")
 def health():
     return {"message": "TrendScope MVP API is running"}
-
-
-@app.get("/debug-gemini")
-def debug_gemini():
-    try:
-        r = model.generate_content("Reply with number 42 only")
-        return {
-            "gemini_response": r.text,
-            "status": "Gemini working"
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "status": "Gemini failed"
-        }
