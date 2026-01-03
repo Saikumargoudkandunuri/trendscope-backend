@@ -224,7 +224,37 @@ def login():
     return "<h2 style='padding:20px'>Login (UI only)</h2><a href='/'>Back</a>"
 
 @app.get("/news/{i}", response_class=HTMLResponse)
-def news(i:int):
-    n=NEWS_CACHE.get(i)
-    if not n: return "Not found"
-    return f"<h2>{n['title']}</h2><a href='{n['link']}'>Read</a>"
+def news(i: int):
+    news = fetch_news()   # 🔥 re-fetch safely
+    item = None
+
+    for n in news:
+        if n["id"] == i:
+            item = n
+            break
+
+    if not item:
+        return "<h3>News not found</h3>"
+
+    return f"""
+    <html>
+    <body style="font-family:Arial; background:#1a237e; color:white; padding:20px;">
+        <a href="/" style="color:white;">⬅ Back</a>
+
+        <div style="background:white; color:black; padding:20px; border-radius:12px;">
+            <h2>{item['title']}</h2>
+
+            <p><b>Short News</b></p>
+            <p>{ai_short_news(item['summary'])}</p>
+
+            <p><b>Instagram Caption</b></p>
+            <p>{ai_caption(item['summary'])}</p>
+
+            <button onclick="window.open('{item['link']}', '_blank')">
+                Read Full News
+            </button>
+        </div>
+    </body>
+    </html>
+    """
+
