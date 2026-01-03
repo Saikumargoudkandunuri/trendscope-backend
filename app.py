@@ -69,14 +69,14 @@ def home(category: str = Query(None)):
     return f"""
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 
 <style>
 html, body {{
     margin:0;
     padding:0;
     width:100%;
-    overflow-x:hidden; /* 🔥 CRITICAL FIX */
+    overflow-x:hidden;
     font-family:Arial;
     background:#f1f3f6;
 }}
@@ -115,7 +115,6 @@ a {{ text-decoration:none; color:black; }}
     display:flex;
     gap:10px;
     overflow-x:auto;
-    -webkit-overflow-scrolling: touch; /* 🔥 MOBILE FIX */
 }}
 
 .flash-card {{
@@ -153,16 +152,19 @@ a {{ text-decoration:none; color:black; }}
 .menu {{
     position:fixed;
     top:0;
-    right:-260px;
+    right:0;
     width:260px;
     height:100%;
     background:white;
     padding:20px;
-    transition:.3s;
+    transform: translateX(100%); /* 🔥 REAL FIX */
+    transition: transform 0.3s ease;
     z-index:10;
 }}
 
-.menu.open {{ right:0; }}
+.menu.open {{
+    transform: translateX(0);
+}}
 
 .menu button {{
     width:100%;
