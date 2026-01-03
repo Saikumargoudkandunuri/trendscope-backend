@@ -89,6 +89,9 @@ def home(category: str = Query(None)):
     if category:
         news = [n for n in news if n["category"] == category]
 
+    # 🔥 ADDITION: Flash news list (top 5)
+    flash_news = news[:5]
+
     html = """
     <html>
     <head>
@@ -123,6 +126,28 @@ def home(category: str = Query(None)):
             font-weight:bold;
             color:#ff5722;
         }
+
+        /* 🔥 ADDITION: Flash slider styles */
+        .flash-box {
+            background:white;
+            margin:10px;
+            padding:10px;
+            border-radius:12px;
+        }
+        .flash-row {
+            display:flex;
+            overflow-x:auto;
+            gap:10px;
+        }
+        .flash-card {
+            min-width:260px;
+        }
+        .flash-card img {
+            width:100%;
+            height:140px;
+            object-fit:cover;
+            border-radius:8px;
+        }
     </style>
     </head>
 
@@ -140,8 +165,29 @@ def home(category: str = Query(None)):
         <a href="/?category=Business">Business</a>
         <a href="/?category=Sports">Sports</a>
     </div>
+
+    <!-- 🔥 ADDITION: Flash News Slider -->
+    <div class="flash-box">
+        <b>🔥 Flash News</b>
+        <div class="flash-row">
     """
 
+    # 🔥 ADDITION: Flash cards loop
+    for f in flash_news:
+        html += f"""
+        <div class="flash-card">
+            <a href="{f['link']}" target="_blank">
+                <img src="https://source.unsplash.com/featured/?india,news">
+            </a>
+        </div>
+        """
+
+    html += """
+        </div>
+    </div>
+    """
+
+    # 🔽 EXISTING NEWS CARDS (UNCHANGED)
     for n in news:
         html += f"""
         <div class="card">
@@ -224,3 +270,4 @@ def news_page(news_id: int):
 @app.get("/health")
 def health():
     return {"status": "OK"}
+
