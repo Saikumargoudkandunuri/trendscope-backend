@@ -52,7 +52,7 @@ def ai_trending_score(title):
     return min(score, 95)
 
 # -------------------------------------------------
-# IMAGE EXTRACTOR (NEW – REQUIRED)
+# IMAGE EXTRACTOR
 # -------------------------------------------------
 def extract_image(entry):
     if "media_content" in entry and entry.media_content:
@@ -75,13 +75,12 @@ def fetch_news():
     for source, url in RSS_SOURCES.items():
         feed = feedparser.parse(url)
         for e in feed.entries[:6]:
-            image = extract_image(e)
             article = {
                 "id": idx,
                 "title": e.title,
                 "summary": e.get("summary", e.title),
                 "link": e.link,
-                "image": image,
+                "image": extract_image(e),
                 "source": source,
                 "trend": ai_trending_score(e.title),
                 "category": ai_category(e.get("summary", e.title))
@@ -120,7 +119,6 @@ def home(category: str = Query(None)):
             display:flex;
             justify-content:space-between;
         }
-
         .category {
             background:#232f3e;
             padding:10px;
@@ -130,7 +128,6 @@ def home(category: str = Query(None)):
             margin-right:10px;
             font-weight:bold;
         }
-
         .flash-box {
             background:white;
             margin:10px;
@@ -153,9 +150,7 @@ def home(category: str = Query(None)):
         }
         .flash-card p {
             font-weight:bold;
-            margin:6px 0;
         }
-
         .card {
             background:white;
             margin:10px;
@@ -168,7 +163,7 @@ def home(category: str = Query(None)):
             color:#ff5722;
         }
 
-        /* PHASE 2 UI */
+        /* PHASE 2A */
         .menu {
             position:fixed;
             top:0;
@@ -192,11 +187,18 @@ def home(category: str = Query(None)):
         function toggleMenu(){
             document.getElementById('menu').classList.toggle('open');
         }
+
         function toggleNotify(){
-            alert("Notifications toggled (UI only)");
+            let n = localStorage.getItem("notify") === "on" ? "off" : "on";
+            localStorage.setItem("notify", n);
+            alert("Notifications: " + n.toUpperCase());
+        }
+
+        function setLang(lang){
+            localStorage.setItem("lang", lang);
+            alert("Language set to " + lang.toUpperCase());
         }
     </script>
-
     </head>
     <body>
 
@@ -247,17 +249,53 @@ def home(category: str = Query(None)):
     html += """
     <div id="menu" class="menu">
         <h3>Menu</h3>
-        <button>Login with Phone (OTP)</button>
-        <button>Language: English / Telugu</button>
-        <button>Notifications ON / OFF</button>
-        <button>Settings</button>
+        <button onclick="location.href='/login'">Login with Phone</button>
+        <button onclick="setLang('en')">Language: English</button>
+        <button onclick="setLang('te')">Language: Telugu</button>
+        <button onclick="toggleNotify()">Notifications ON / OFF</button>
+        <button onclick="location.href='/settings'">Settings</button>
     </div>
 
     </body>
     </html>
     """
-
     return html
+
+# -------------------------------------------------
+# LOGIN PAGE (PHASE 2A UI)
+# -------------------------------------------------
+@app.get("/login", response_class=HTMLResponse)
+def login():
+    return """
+    <html>
+    <body style="font-family:Arial; padding:20px;">
+        <h2>Login with Phone</h2>
+        <input placeholder="Enter phone number" style="width:100%;padding:10px;">
+        <button style="width:100%;padding:10px;margin-top:10px;">
+            Send OTP
+        </button>
+        <p>(OTP backend comes in next phase)</p>
+        <a href="/">⬅ Back</a>
+    </body>
+    </html>
+    """
+
+# -------------------------------------------------
+# SETTINGS PAGE
+# -------------------------------------------------
+@app.get("/settings", response_class=HTMLResponse)
+def settings():
+    return """
+    <html>
+    <body style="font-family:Arial; padding:20px;">
+        <h2>Settings</h2>
+        <p>• Notifications</p>
+        <p>• Language</p>
+        <p>• App Version</p>
+        <a href="/">⬅ Back</a>
+    </body>
+    </html>
+    """
 
 # -------------------------------------------------
 # DETAIL PAGE
@@ -268,19 +306,14 @@ def news_page(news_id: int):
     if not item:
         return "<h3>Not found</h3>"
 
-    short = ai_short_news(item["summary"])
-    caption = ai_caption(item["summary"])
-
     return f"""
     <html>
     <body style="font-family:Arial; background:#1a237e; color:white; padding:20px;">
         <a href="/" style="color:white;">⬅ Back</a>
         <div style="background:white; color:black; padding:20px; border-radius:12px;">
             <h2>{item['title']}</h2>
-            <p><b>Short News</b></p>
-            <textarea style="width:100%;height:90px;">{short}</textarea>
-            <p><b>Instagram Caption</b></p>
-            <textarea style="width:100%;height:90px;">{caption}</textarea>
+            <textarea style="width:100%;height:90px;">{ai_short_news(item['summary'])}</textarea>
+            <textarea style="width:100%;height:90px;">{ai_caption(item['summary'])}</textarea>
             <button onclick="window.open('{item['link']}', '_blank')">
                 Read Full News
             </button>
@@ -295,4 +328,5 @@ def news_page(news_id: int):
 @app.get("/health")
 def health():
     return {"status": "OK"}
+
 
