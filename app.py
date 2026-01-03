@@ -52,6 +52,18 @@ def ai_trending_score(title):
     return min(score, 95)
 
 # -------------------------------------------------
+# IMAGE EXTRACTOR (NEW – REQUIRED)
+# -------------------------------------------------
+def extract_image(entry):
+    if "media_content" in entry and entry.media_content:
+        return entry.media_content[0].get("url")
+    if "links" in entry:
+        for l in entry.links:
+            if l.get("type", "").startswith("image"):
+                return l.get("href")
+    return "https://via.placeholder.com/400x200?text=News"
+
+# -------------------------------------------------
 # FETCH NEWS
 # -------------------------------------------------
 def fetch_news():
@@ -63,11 +75,13 @@ def fetch_news():
     for source, url in RSS_SOURCES.items():
         feed = feedparser.parse(url)
         for e in feed.entries[:6]:
+            image = extract_image(e)
             article = {
                 "id": idx,
                 "title": e.title,
                 "summary": e.get("summary", e.title),
                 "link": e.link,
+                "image": image,
                 "source": source,
                 "trend": ai_trending_score(e.title),
                 "category": ai_category(e.get("summary", e.title))
@@ -89,7 +103,6 @@ def home(category: str = Query(None)):
     if category:
         news = [n for n in news if n["category"] == category]
 
-    # 🔥 ADDITION: Flash news list (top 5)
     flash_news = news[:5]
 
     html = """
@@ -98,6 +111,8 @@ def home(category: str = Query(None)):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { margin:0; font-family: Arial; background:#f1f3f6; }
+        a { text-decoration:none; color:black; }
+
         .header {
             background:#131921;
             color:white;
@@ -105,6 +120,7 @@ def home(category: str = Query(None)):
             display:flex;
             justify-content:space-between;
         }
+
         .category {
             background:#232f3e;
             padding:10px;
@@ -112,22 +128,9 @@ def home(category: str = Query(None)):
         .category a {
             color:white;
             margin-right:10px;
-            text-decoration:none;
             font-weight:bold;
-        }
-        .card {
-            background:white;
-            margin:10px;
-            padding:12px;
-            border-radius:10px;
-        }
-        .trend {
-            float:right;
-            font-weight:bold;
-            color:#ff5722;
         }
 
-        /* 🔥 ADDITION: Flash slider styles */
         .flash-box {
             background:white;
             margin:10px;
@@ -148,14 +151,61 @@ def home(category: str = Query(None)):
             object-fit:cover;
             border-radius:8px;
         }
-    </style>
-    </head>
+        .flash-card p {
+            font-weight:bold;
+            margin:6px 0;
+        }
 
+        .card {
+            background:white;
+            margin:10px;
+            padding:12px;
+            border-radius:10px;
+        }
+        .trend {
+            float:right;
+            font-weight:bold;
+            color:#ff5722;
+        }
+
+        /* PHASE 2 UI */
+        .menu {
+            position:fixed;
+            top:0;
+            right:-260px;
+            width:260px;
+            height:100%;
+            background:white;
+            padding:20px;
+            transition:0.3s;
+            box-shadow:-2px 0 8px rgba(0,0,0,0.2);
+        }
+        .menu.open { right:0; }
+        .menu button {
+            width:100%;
+            padding:10px;
+            margin-top:10px;
+        }
+    </style>
+
+    <script>
+        function toggleMenu(){
+            document.getElementById('menu').classList.toggle('open');
+        }
+        function toggleNotify(){
+            alert("Notifications toggled (UI only)");
+        }
+    </script>
+
+    </head>
     <body>
 
     <div class="header">
         <b>TrendScope 🇮🇳</b>
-        <div>🔔 ☰</div>
+        <div>
+            <span onclick="toggleNotify()">🔔</span>
+            <span onclick="toggleMenu()"> ☰</span>
+        </div>
     </div>
 
     <div class="category">
@@ -166,18 +216,17 @@ def home(category: str = Query(None)):
         <a href="/?category=Sports">Sports</a>
     </div>
 
-    <!-- 🔥 ADDITION: Flash News Slider -->
     <div class="flash-box">
         <b>🔥 Flash News</b>
         <div class="flash-row">
     """
 
-    # 🔥 ADDITION: Flash cards loop
     for f in flash_news:
         html += f"""
         <div class="flash-card">
             <a href="{f['link']}" target="_blank">
-                <img src="https://source.unsplash.com/featured/?india,news">
+                <img src="{f['image']}">
+                <p>{f['title']}</p>
             </a>
         </div>
         """
@@ -187,7 +236,6 @@ def home(category: str = Query(None)):
     </div>
     """
 
-    # 🔽 EXISTING NEWS CARDS (UNCHANGED)
     for n in news:
         html += f"""
         <div class="card">
@@ -197,6 +245,14 @@ def home(category: str = Query(None)):
         """
 
     html += """
+    <div id="menu" class="menu">
+        <h3>Menu</h3>
+        <button>Login with Phone (OTP)</button>
+        <button>Language: English / Telugu</button>
+        <button>Notifications ON / OFF</button>
+        <button>Settings</button>
+    </div>
+
     </body>
     </html>
     """
@@ -217,45 +273,14 @@ def news_page(news_id: int):
 
     return f"""
     <html>
-    <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {{
-            font-family: Arial;
-            background:#1a237e;
-            color:white;
-            padding:20px;
-        }}
-        .box {{
-            background:white;
-            color:black;
-            padding:20px;
-            border-radius:12px;
-        }}
-        textarea {{
-            width:100%;
-            height:90px;
-        }}
-        button {{
-            width:100%;
-            padding:12px;
-            margin-top:10px;
-        }}
-    </style>
-    </head>
-
-    <body>
+    <body style="font-family:Arial; background:#1a237e; color:white; padding:20px;">
         <a href="/" style="color:white;">⬅ Back</a>
-
-        <div class="box">
+        <div style="background:white; color:black; padding:20px; border-radius:12px;">
             <h2>{item['title']}</h2>
-
             <p><b>Short News</b></p>
-            <textarea readonly>{short}</textarea>
-
+            <textarea style="width:100%;height:90px;">{short}</textarea>
             <p><b>Instagram Caption</b></p>
-            <textarea readonly>{caption}</textarea>
-
+            <textarea style="width:100%;height:90px;">{caption}</textarea>
             <button onclick="window.open('{item['link']}', '_blank')">
                 Read Full News
             </button>
