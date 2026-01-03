@@ -225,7 +225,7 @@ def login():
 
 @app.get("/news/{i}", response_class=HTMLResponse)
 def news(i: int):
-    news = fetch_news()   # 🔥 re-fetch safely
+    news = fetch_news()
     item = None
 
     for n in news:
@@ -236,25 +236,109 @@ def news(i: int):
     if not item:
         return "<h3>News not found</h3>"
 
+    short = ai_short_news(item["summary"])
+    caption = ai_caption(item["summary"])
+
     return f"""
     <html>
-    <body style="font-family:Arial; background:#1a237e; color:white; padding:20px;">
-        <a href="/" style="color:white;">⬅ Back</a>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{
+                margin:0;
+                font-family: Arial;
+                background:#0d47a1;
+                color:white;
+            }}
+            .container {{
+                padding:16px;
+            }}
+            .card {{
+                background:white;
+                color:black;
+                padding:16px;
+                border-radius:14px;
+            }}
+            img {{
+                width:100%;
+                border-radius:12px;
+                margin-bottom:12px;
+            }}
+            .title {{
+                font-size:20px;
+                font-weight:bold;
+                margin-bottom:10px;
+            }}
+            .label {{
+                font-weight:bold;
+                margin-top:14px;
+            }}
+            .box {{
+                background:#f1f3f6;
+                padding:10px;
+                border-radius:8px;
+                margin-top:6px;
+            }}
+            .btn {{
+                width:100%;
+                padding:12px;
+                margin-top:12px;
+                border:none;
+                border-radius:10px;
+                font-size:16px;
+            }}
+            .read {{
+                background:#ff9800;
+                color:black;
+            }}
+            .share {{
+                background:#1e88e5;
+                color:white;
+            }}
+            a {{
+                color:white;
+                text-decoration:none;
+                display:inline-block;
+                margin-bottom:12px;
+            }}
+        </style>
 
-        <div style="background:white; color:black; padding:20px; border-radius:12px;">
-            <h2>{item['title']}</h2>
+        <script>
+            function shareNews() {{
+                if (navigator.share) {{
+                    navigator.share({{
+                        title: "{item['title']}",
+                        text: "{caption}",
+                        url: "{item['link']}"
+                    }});
+                }} else {{
+                    alert("Sharing not supported on this browser");
+                }}
+            }}
+        </script>
+    </head>
 
-            <p><b>Short News</b></p>
-            <p>{ai_short_news(item['summary'])}</p>
+    <body>
+        <div class="container">
+            <a href="/">⬅ Back</a>
 
-            <p><b>Instagram Caption</b></p>
-            <p>{ai_caption(item['summary'])}</p>
+            <div class="card">
+                <img src="{item['image']}">
 
-            <button onclick="window.open('{item['link']}', '_blank')">
-                Read Full News
-            </button>
+                <div class="title">{item['title']}</div>
+
+                <div class="label">📰 Short News</div>
+                <div class="box">{short}</div>
+
+                <div class="label">📸 Instagram Caption</div>
+                <div class="box">{caption}</div>
+
+                <button class="btn share" onclick="shareNews()">🔗 Share</button>
+                <button class="btn read" onclick="window.open('{item['link']}', '_blank')">
+                    Read Full News
+                </button>
+            </div>
         </div>
     </body>
     </html>
     """
-
