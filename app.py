@@ -163,7 +163,18 @@ def home(category: str = Query(None)):
             color:#ff5722;
         }
 
-        /* PHASE 2A */
+        /* PHASE 2A FIX */
+        .overlay {
+            position:fixed;
+            top:0;
+            left:0;
+            width:100%;
+            height:100%;
+            background:rgba(0,0,0,0.4);
+            display:none;
+            z-index:9;
+        }
+
         .menu {
             position:fixed;
             top:0;
@@ -174,6 +185,7 @@ def home(category: str = Query(None)):
             padding:20px;
             transition:0.3s;
             box-shadow:-2px 0 8px rgba(0,0,0,0.2);
+            z-index:10;
         }
         .menu.open { right:0; }
         .menu button {
@@ -185,7 +197,18 @@ def home(category: str = Query(None)):
 
     <script>
         function toggleMenu(){
-            document.getElementById('menu').classList.toggle('open');
+            const menu = document.getElementById('menu');
+            const overlay = document.getElementById('overlay');
+
+            menu.classList.toggle('open');
+
+            if(menu.classList.contains('open')){
+                overlay.style.display = 'block';
+                document.body.style.overflow = 'hidden';
+            } else {
+                overlay.style.display = 'none';
+                document.body.style.overflow = 'auto';
+            }
         }
 
         function toggleNotify(){
@@ -200,7 +223,9 @@ def home(category: str = Query(None)):
         }
     </script>
     </head>
+
     <body>
+    <div id="overlay" class="overlay" onclick="toggleMenu()"></div>
 
     <div class="header">
         <b>TrendScope 🇮🇳</b>
@@ -262,7 +287,7 @@ def home(category: str = Query(None)):
     return html
 
 # -------------------------------------------------
-# LOGIN PAGE (PHASE 2A UI)
+# LOGIN PAGE
 # -------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 def login():
@@ -328,5 +353,3 @@ def news_page(news_id: int):
 @app.get("/health")
 def health():
     return {"status": "OK"}
-
-
