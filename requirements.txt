@@ -14,3 +14,4 @@ uvicorn
 requests
 feedparser
 python-dotenv
+schedule
