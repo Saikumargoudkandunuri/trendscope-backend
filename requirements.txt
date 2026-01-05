@@ -9,3 +9,8 @@ uvicorn
 feedparser
 requests
 google-generativeai
+fastapi
+uvicorn
+requests
+feedparser
+python-dotenv
