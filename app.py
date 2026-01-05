@@ -69,7 +69,6 @@ def fetch_news():
 
 # ================== NEW (Instagram helper) ==================
 def post_to_instagram(image_url: str, caption: str):
-    # Step 1: create media
     media_res = requests.post(
         f"https://graph.facebook.com/v24.0/{IG_BUSINESS_ID}/media",
         data={
@@ -84,7 +83,6 @@ def post_to_instagram(image_url: str, caption: str):
 
     creation_id = media_res["id"]
 
-    # Step 2: publish media
     publish_res = requests.post(
         f"https://graph.facebook.com/v24.0/{IG_BUSINESS_ID}/media_publish",
         data={
