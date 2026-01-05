@@ -204,7 +204,7 @@ def news(i: int):
         return "<h3>News not found</h3>"
 
     short = ai_short_news(item["summary"])
-    caption = ai_caption(item["summary"])
+    caption = ai_caption(item["summary"]).replace('"', '\\"')
 
     return f"""
     <html>
@@ -216,15 +216,17 @@ def news(i: int):
         <button onclick="postToIG()">🚀 Post to Instagram</button>
 
         <script>
-        function postToIG(){{
+        function postToIG() {{
             fetch("/instagram/post", {{
-                method:"POST",
-                headers:{{"Content-Type":"application/json"}},
+                method: "POST",
+                headers: {{
+                    "Content-Type": "application/json"
+                }},
                 body: JSON.stringify({{
-                    imageUrl: "{item['image']}",
-                    caption: `{caption}`
+                    "imageUrl": "{item['image']}",
+                    "caption": "{caption}"
                 }})
-            }).then(r=>r.json()).then(alert);
+            }}).then(r => r.json()).then(alert);
         }}
         </script>
     </body>
