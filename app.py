@@ -25,23 +25,43 @@ RSS_SOURCES = {
 }
 
 def ai_short_news(text):
-    if not GEMINI_API_KEY:
+    try:
+        if not GEMINI_API_KEY:
+            raise Exception("No Gemini key")
+
+        prompt = f"Summarize this Indian news in 15-20 simple words:\n{text}"
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        res = model.generate_content(prompt)
+
+        if not res or not res.text:
+            raise Exception("Empty Gemini response")
+
+        return res.text.strip()
+
+    except Exception as e:
+        # SAFE FALLBACK (never crash UI)
         words = re.findall(r"\w+", text)
         return " ".join(words[:22]) + "."
 
-    prompt = f"Summarize this Indian news in 15-20 simple words:\n{text}"
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    return model.generate_content(prompt).text.strip()
 def ai_caption(text):
-    if not GEMINI_API_KEY:
-        return ai_short_news(text) + "\n\n#IndiaNews"
+    try:
+        if not GEMINI_API_KEY:
+            raise Exception("No Gemini key")
 
-    prompt = (
-        "Write a short Instagram caption (max 2 lines) for this Indian news. "
-        "Add 3 relevant hashtags.\n\nNews:\n" + text
-    )
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    return model.generate_content(prompt).text.strip()
+        prompt = (
+            "Write a short Instagram caption (max 2 lines) for this Indian news. "
+            "Add 3 relevant hashtags.\n\nNews:\n" + text
+        )
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        res = model.generate_content(prompt)
+
+        if not res or not res.text:
+            raise Exception("Empty Gemini response")
+
+        return res.text.strip()
+
+    except Exception:
+        return ai_short_news(text) + "\n\n#IndiaNews"
 
 
 def ai_category(text):
