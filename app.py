@@ -4,6 +4,7 @@ import feedparser, re
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -99,7 +100,17 @@ def fetch_news():
             out.append(art)
             i += 1
     return out
+# ================== AUTO POST CONFIG ==================
 
+POST_CONFIG = {
+    "Sports": 2,
+    "Business": 2,
+    "Tech": 1,
+}
+
+POST_DELAY_SECONDS = 20  # gap between posts to avoid spam
+
+# ======================================================
 def post_category_wise_news():
     news = fetch_news()
 
@@ -114,6 +125,7 @@ def post_category_wise_news():
                 time.sleep(POST_DELAY_SECONDS)
             except Exception as e:
                 print("Post failed:", e)
+
 
 
 import requests
@@ -429,24 +441,11 @@ def news(i: int):
     </body>
     </html>
     """
-import schedule
-import threading
-import time
+@app.get("/cron/hourly")
+def hourly_cron():
+    post_category_wise_news()
+    return {"status": "Hourly category-wise posting done"}
 
-def auto_post_top_news():
-     news = fetch_news()
-     top = sorted(news, key=lambda x: x["trend"], reverse=True)[0]
-     caption = ai_caption(top["summary"])
-     post_to_instagram(top["image"], caption)
-
-def run_scheduler():
-    schedule.every().day.at("10:00").do(auto_post_top_news)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
-
-
-threading.Thread(target=run_scheduler, daemon=True).start()
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin():
@@ -472,14 +471,3 @@ def admin():
     </html>
     """
 
-# ================== AUTO POST CONFIG ==================
-
-POST_CONFIG = {
-    "Sports": 2,
-    "Business": 2,
-    "Tech": 1,
-}
-
-POST_DELAY_SECONDS = 20  # gap between posts to avoid spam
-
-# ======================================================
