@@ -5,6 +5,7 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 import time
+import json
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -111,20 +112,44 @@ POST_CONFIG = {
 POST_DELAY_SECONDS = 20  # gap between posts to avoid spam
 
 # ======================================================
+
+POSTED_FILE = "posted.json"
+
+def load_posted_ids():
+    if not os.path.exists(POSTED_FILE):
+        return set()
+    try:
+        with open(POSTED_FILE, "r") as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+def save_posted_ids(ids):
+    with open(POSTED_FILE, "w") as f:
+        json.dump(list(ids), f)
+
+
 def post_category_wise_news():
     news = fetch_news()
+    posted_ids = load_posted_ids()
 
     for category, limit in POST_CONFIG.items():
         items = [n for n in news if n["category"] == category]
         items = sorted(items, key=lambda x: x["trend"], reverse=True)[:limit]
 
         for n in items:
+            if str(n["id"]) in posted_ids:
+                continue
+
             try:
                 caption = ai_caption(n["summary"])
                 post_to_instagram(n["image"], caption)
+                posted_ids.add(str(n["id"]))
+                save_posted_ids(posted_ids)
                 time.sleep(POST_DELAY_SECONDS)
             except Exception as e:
                 print("Post failed:", e)
+
 
 
 
