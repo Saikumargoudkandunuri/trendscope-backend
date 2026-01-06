@@ -1,3 +1,6 @@
 .env
 __pycache__/
 images/output/
+posted.json
+*.png
+.vscode/

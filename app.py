@@ -1,18 +1,32 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
-import feedparser, re
-import google.generativeai as genai
-import os
-from dotenv import load_dotenv
-import time
+print("APP.PY LOADED FROM:", __file__)
+# 1. Standard Library Imports (Built-in Python modules)
 import json
-from image_generator import generate_news_image
-from pydantic import BaseModel
-import uuid
-from threading import Thread
+import logging
+import os
+import random
+import re
+import threading
 import time
+import uuid
+from datetime import datetime
+from contextlib import asynccontextmanager
+
+# 2. Third-Party Library Imports (Installed via pip)
 import cloudinary
 import cloudinary.uploader
+import feedparser
+from google import genai  # Import the new SDK
+import pytz
+import requests  # Required for Instagram API calls
+from dotenv import load_dotenv
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+# 3. Local Application Imports (Your own files)
+from image_generator import generate_news_image
+
+logger = logging.getLogger("uvicorn.error")
 
 load_dotenv()
 
@@ -29,13 +43,17 @@ def upload_image_to_cloudinary(local_path):
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Initialize the new client
+client = None
 if GEMINI_API_KEY:
-     genai.configure(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 app = FastAPI()
 
 NEWS_CACHE = {}
+
+IS_POSTING_BUSY = False
 
 RSS_SOURCES = {
     "Hindustan Times": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
@@ -123,12 +141,12 @@ def fetch_news():
 # ================== AUTO POST CONFIG ==================
 
 POST_CONFIG = {
-    "Sports": 3,
-    "Business": 3,
-    "Tech": 3,
+    "Sports": 1,
+    "Business": 1,
+    "Tech": 1,
 }
 
-POST_DELAY_SECONDS = 600  # gap between posts to avoid spam
+POST_DELAY_SECONDS = 900  # gap between posts to avoid spam
 
 # ======================================================
 
@@ -148,46 +166,61 @@ def save_posted_ids(ids):
         json.dump(list(ids), f)
 
 
+def is_quiet_hours_ist():
+    """Returns True if current time is between 1 AM and 6 AM IST"""
+    ist = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.now(ist)
+    # Check if hour is 1, 2, 3, 4, or 5
+    if 1 <= now_ist.hour < 6:
+        return True
+    return False
+
 def post_category_wise_news():
-    print("🚀 Auto-post job triggered")
+    global IS_POSTING_BUSY
+    
+    # Check if another process is already working
+    if IS_POSTING_BUSY:
+        logger.info("⚠️ Already posting... skipping this cycle.")
+        return
+        
+    if is_quiet_hours_ist():
+        logger.info("🌙 Quiet hours (1AM-6AM IST).")
+        return
 
-    news = fetch_news()
-    posted_ids = load_posted_ids()
+    try:
+        IS_POSTING_BUSY = True # LOCK
+        news = fetch_news()
+        posted_ids = load_posted_ids()
+        
+        for category, limit in POST_CONFIG.items():
+            items = [n for n in news if n["category"] == category]
+            items = sorted(items, key=lambda x: x["trend"], reverse=True)[:limit]
 
-    for category, limit in POST_CONFIG.items():
-        items = [n for n in news if n["category"] == category]
-        items = sorted(items, key=lambda x: x["trend"], reverse=True)[:limit]
+            for n in items:
+                if n["link"] in posted_ids:
+                    continue
 
-        for n in items:
-            if n["link"] in posted_ids:
-                continue
+                try:
+                    # ... (image generation & cloudinary code) ...
+                    
+                    ig_res = post_to_instagram(public_url, caption)
+                    
+                    if "id" in ig_res:
+                        # ✅ SAVE IMMEDIATELY BEFORE SLEEPING
+                        posted_ids.add(n["link"])
+                        save_posted_ids(posted_ids)
+                        logger.info(f"✅ Success! ID saved. {n['title']}")
 
-            try:
-                caption = ai_caption(n["summary"])
-
-                image_path = generate_news_image(
-                    headline=n["title"],
-                    description=n["summary"],
-                    image_url=n["image"],
-                    output_name=f"{hash(n['link'])}.png"
-
-                )
-                print("Generated image:", image_path)
-
-# ✅ STEP 5: Upload to Cloudinary
-                public_url = upload_image_to_cloudinary(image_path)
-                print("Uploaded to Cloudinary:", public_url)
-
-# ✅ STEP 5: Post to Instagram
-                ig_res = post_to_instagram(public_url, caption)
-                print("Instagram response:", ig_res)
-
-
-                posted_ids.add(n["link"])
-                save_posted_ids(posted_ids)
-                time.sleep(POST_DELAY_SECONDS)
-            except Exception as e:
-                print("Post failed:", e)
+                        # Wait between posts
+                        delay = random.randint(900, 1800)
+                        logger.info(f"🕒 Waiting {delay//60} mins...")
+                        time.sleep(delay)
+                
+                except Exception as e:
+                    logger.error(f"Item error: {e}")
+                    
+    finally:
+        IS_POSTING_BUSY = False # UNLOCK
 
 
 
@@ -197,28 +230,42 @@ import requests
 IG_BUSINESS_ID = os.getenv("IG_BUSINESS_ID")
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 
-def post_to_instagram(image_url: str, caption: str):
-     media = requests.post(
-         f"https://graph.facebook.com/v24.0/{IG_BUSINESS_ID}/media",
-         data={
-             "image_url": image_url,
-             "caption": caption,
-             "access_token": PAGE_ACCESS_TOKEN
-         }
-     ).json()
+def post_to_instagram(image_url, caption):
+    # STEP 1: Create media container
+    create_res = requests.post(
+        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
+        data={
+            "image_url": image_url,
+            "caption": caption,
+            "access_token": PAGE_ACCESS_TOKEN
+        }
+    ).json()
 
-     if "id" not in media:
-         return media
+    logger.info(f"CREATE RESPONSE: {create_res}")
 
-     publish = requests.post(
-         f"https://graph.facebook.com/v24.0/{IG_BUSINESS_ID}/media_publish",
-         data={
-             "creation_id": media["id"],
-             "access_token": PAGE_ACCESS_TOKEN
-         }
-     ).json()
+    if "id" not in create_res:
+        print("Error creating media:", create_res)
+        return create_res
 
-     return publish
+    creation_id = create_res["id"]
+
+    # STEP 2: WAIT for Meta to process the image (Crucial!)
+    # Give it 30 seconds to download and process your Cloudinary URL
+    time.sleep(30)
+
+    # STEP 3: Publish media
+    publish_res = requests.post(
+        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
+        data={
+            "creation_id": creation_id,
+            "access_token": PAGE_ACCESS_TOKEN
+        }
+    ).json()
+
+    logger.info(f"PUBLISH RESPONSE: {publish_res}")
+    return publish_res
+
+
 
 class ImageRequest(BaseModel):
     headline: str
@@ -529,8 +576,12 @@ def news(i: int):
     """
 @app.get("/cron/hourly")
 def hourly_cron():
-    post_category_wise_news()
-    return {"status": "Hourly category-wise posting done"}
+    # Trigger the function manually via URL
+    thread = threading.Thread(target=post_category_wise_news)
+    thread.start()
+    return {"status": "Post process started in background"}
+
+
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -558,4 +609,29 @@ def admin():
     """
 
 
+# Create a function to run the loop
+def run_background_worker():
+    print("🚀 Background Worker Thread Started")
+    while True:
+        try:
+            post_category_wise_news()
+        except Exception as e:
+            print(f"Worker Error: {e}")
+        
+        # Wait 1 hour (3600 seconds)
+        time.sleep(3600)
 
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This runs ON STARTUP
+    thread = threading.Thread(target=run_background_worker, daemon=True)
+    thread.start()
+    print("🚀 Background Worker Started via Lifespan")
+    yield
+    # This runs ON SHUTDOWN (optional)
+    print("🛑 Application Shutting Down")
+
+# Update your FastAPI initialization line near the top:
+app = FastAPI(lifespan=lifespan)

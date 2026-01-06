@@ -5,8 +5,12 @@ print("🚀 TrendScope Background Worker started")
 
 while True:
     try:
+        # This function now handles the 1AM-6AM IST check inside itself
         post_category_wise_news()
     except Exception as e:
-        print("Worker error:", e)
+        print(f"Worker Loop Error: {e}")
 
-    time.sleep(3600)  # 1 hour
+    # Wait 1 hour before checking for fresh news again
+    # This prevents the bot from constantly hitting the RSS feeds
+    print("💤 Worker sleeping for 1 hour...")
+    time.sleep(3600)

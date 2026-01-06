@@ -16,3 +16,6 @@ feedparser
 python-dotenv
 schedule
 pillow
+cloudinary
+python-dotenv
+pytz
