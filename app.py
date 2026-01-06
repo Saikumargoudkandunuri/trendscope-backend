@@ -138,13 +138,13 @@ def post_category_wise_news():
         items = sorted(items, key=lambda x: x["trend"], reverse=True)[:limit]
 
         for n in items:
-            if str(n["id"]) in posted_ids:
+            if n["link"] in posted_ids:
                 continue
 
             try:
                 caption = ai_caption(n["summary"])
                 post_to_instagram(n["image"], caption)
-                posted_ids.add(str(n["id"]))
+                posted_ids.add(n["link"])
                 save_posted_ids(posted_ids)
                 time.sleep(POST_DELAY_SECONDS)
             except Exception as e:
