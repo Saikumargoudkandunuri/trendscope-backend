@@ -6,6 +6,23 @@ import os
 from dotenv import load_dotenv
 import time
 import json
+from image_generator import generate_news_image
+from pydantic import BaseModel
+import uuid
+from threading import Thread
+import time
+import cloudinary
+import cloudinary.uploader
+
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+)
+def upload_image_to_cloudinary(local_path):
+    res = cloudinary.uploader.upload(local_path, folder="trendscope")
+    return res["secure_url"]
+
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -104,12 +121,12 @@ def fetch_news():
 # ================== AUTO POST CONFIG ==================
 
 POST_CONFIG = {
-    "Sports": 2,
-    "Business": 2,
-    "Tech": 1,
+    "Sports": 3,
+    "Business": 3,
+    "Tech": 3,
 }
 
-POST_DELAY_SECONDS = 20  # gap between posts to avoid spam
+POST_DELAY_SECONDS = 600  # gap between posts to avoid spam
 
 # ======================================================
 
@@ -130,6 +147,8 @@ def save_posted_ids(ids):
 
 
 def post_category_wise_news():
+    print("🚀 Auto-post job triggered")
+
     news = fetch_news()
     posted_ids = load_posted_ids()
 
@@ -143,7 +162,25 @@ def post_category_wise_news():
 
             try:
                 caption = ai_caption(n["summary"])
-                post_to_instagram(n["image"], caption)
+                caption = ai_caption(n["summary"])
+
+                image_path = generate_news_image(
+                    headline=n["title"],
+                    description=n["summary"],
+                    image_url=n["image"],
+                    output_name=f"{hash(n['link'])}.png"
+                )
+                print("Generated image:", image_path)
+
+# ✅ STEP 5: Upload to Cloudinary
+                public_url = upload_image_to_cloudinary(image_path)
+                print("Uploaded to Cloudinary:", public_url)
+
+# ✅ STEP 5: Post to Instagram
+                ig_res = post_to_instagram(public_url, caption)
+                print("Instagram response:", ig_res)
+
+
                 posted_ids.add(n["link"])
                 save_posted_ids(posted_ids)
                 time.sleep(POST_DELAY_SECONDS)
@@ -180,6 +217,28 @@ def post_to_instagram(image_url: str, caption: str):
      ).json()
 
      return publish
+
+class ImageRequest(BaseModel):
+    headline: str
+    description: str
+    image_url: str | None = None
+
+@app.post("/api/generate-image")
+def api_generate_image(data: ImageRequest):
+    filename = f"{uuid.uuid4().hex}.png"
+
+    path = generate_news_image(
+        headline=data.headline,
+        description=data.description,
+        image_url=data.image_url or "",
+        output_name=filename
+    )
+
+    return {
+        "status": "success",
+        "image_path": path
+    }
+    
 
 @app.get("/", response_class=HTMLResponse)
 def home(category: str = Query(None)):
@@ -496,3 +555,17 @@ def admin():
     </html>
     """
 
+
+
+def auto_poster_loop():
+    while True:
+        try:
+            print("⏰ Running auto-post job")
+            post_category_wise_news()
+        except Exception as e:
+            print("Auto-post error:", e)
+        time.sleep(3600)  # every hour
+
+@app.on_event("startup")
+def start_scheduler():
+    Thread(target=auto_poster_loop, daemon=True).start()
