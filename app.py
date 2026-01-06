@@ -100,6 +100,20 @@ def fetch_news():
             i += 1
     return out
 
+def post_category_wise_news():
+    news = fetch_news()
+
+    for category, limit in POST_CONFIG.items():
+        items = [n for n in news if n["category"] == category]
+        items = sorted(items, key=lambda x: x["trend"], reverse=True)[:limit]
+
+        for n in items:
+            try:
+                caption = ai_caption(n["summary"])
+                post_to_instagram(n["image"], caption)
+                time.sleep(POST_DELAY_SECONDS)
+            except Exception as e:
+                print("Post failed:", e)
 
 
 import requests
@@ -458,3 +472,14 @@ def admin():
     </html>
     """
 
+# ================== AUTO POST CONFIG ==================
+
+POST_CONFIG = {
+    "Sports": 2,
+    "Business": 2,
+    "Tech": 1,
+}
+
+POST_DELAY_SECONDS = 20  # gap between posts to avoid spam
+
+# ======================================================
