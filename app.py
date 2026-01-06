@@ -14,6 +14,8 @@ import time
 import cloudinary
 import cloudinary.uploader
 
+load_dotenv()
+
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -24,7 +26,7 @@ def upload_image_to_cloudinary(local_path):
     return res["secure_url"]
 
 
-load_dotenv()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if GEMINI_API_KEY:
@@ -162,13 +164,13 @@ def post_category_wise_news():
 
             try:
                 caption = ai_caption(n["summary"])
-                caption = ai_caption(n["summary"])
 
                 image_path = generate_news_image(
                     headline=n["title"],
                     description=n["summary"],
                     image_url=n["image"],
                     output_name=f"{hash(n['link'])}.png"
+
                 )
                 print("Generated image:", image_path)
 
@@ -557,15 +559,3 @@ def admin():
 
 
 
-def auto_poster_loop():
-    while True:
-        try:
-            print("⏰ Running auto-post job")
-            post_category_wise_news()
-        except Exception as e:
-            print("Auto-post error:", e)
-        time.sleep(3600)  # every hour
-
-@app.on_event("startup")
-def start_scheduler():
-    Thread(target=auto_poster_loop, daemon=True).start()
