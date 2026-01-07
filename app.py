@@ -202,29 +202,30 @@ def ai_caption(text):
 
         
 def ai_instagram_rewrite(text):
-    """Rewrites news into short, emotional, jargon-free Instagram style."""
+    """The main RVCJ-style engine"""
     prompt = f"""
-    Rewrite this news for an Instagram Breaking News alert.
-    
-    STYLE:
-    - Start with 🚨 BREAKING or 🚨 JUST IN.
-    - Short, punchy sentences. Emotional tone.
-    - NO jargon. Simple language.
-    - MAX 18 words total.
+    Rewrite this news in the style of RVCJ Instagram.
+    RULES:
+    1. Start with a viral hook: 🚨 BIG BREAKING, 🔥 TRENDING, or 😱 DID YOU KNOW?
+    2. Use short, punchy, emotional sentences.
+    3. NO JARGON. Use simple language.
+    4. Max 18 words total.
     
     News: {text}
     """
     try:
-        # We use gemini-1.5-flash as it is more stable for this SDK
-        res = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
+        res = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
         return res.text.strip().replace('"', '')
     except Exception as e:
         logger.error(f"AI Rewrite Error: {e}")
-        # Fallback content if the API fails so the post isn't empty
-        return f"🚨 BREAKING: {text[:60]}... More updates soon. #IndiaNews"
+        return f"🚨 BIG BREAKING: {text[:50]}..."
+
+# These two aliases ensure your website routes don't crash
+def ai_short_news(text):
+    return ai_instagram_rewrite(text)
+
+def ai_caption(text):
+    return ai_instagram_rewrite(text)
 
 # --- CORE LOGIC ---
 def post_category_wise_news():
