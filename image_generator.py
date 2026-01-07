@@ -6,7 +6,6 @@ from io import BytesIO
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "images", "output")
 LOGO_PATH = os.path.join(BASE_DIR, "assets", "channels4_profile (1) (1).png")
-# Path to fonts based on your logs
 FONT_PATH = os.path.join(BASE_DIR, "fonts", "arial.ttf")
 FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
 
@@ -53,7 +52,6 @@ def generate_news_image(headline, description, image_url, output_name="post.png"
             img.paste(logo, (920, 45), logo)
         except: pass
 
-    # Image Handling
     try:
         r = requests.get(image_url, timeout=10)
         photo = Image.open(BytesIO(r.content)).convert("RGB").resize((960, 520))
@@ -65,7 +63,7 @@ def generate_news_image(headline, description, image_url, output_name="post.png"
 
     y = 700
     y = draw_wrapped_text(draw, headline.upper(), 60, y, 960, get_font(60, True), TEXT_COLOR)
-    draw_wrapped_text(draw, description[:200]+"...", 60, y+20, 960, get_font(34), GRAY_TEXT)
+    draw_wrapped_text(draw, description[:180]+"...", 60, y+20, 960, get_font(34), GRAY_TEXT)
 
     draw.line([60, 1000, 1020, 1000], fill=(50, 50, 60), width=2)
     draw.text((60, 1020), "FOLLOW @TRENDSCOPE", fill=ACCENT_COLOR, font=get_font(28, True))

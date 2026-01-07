@@ -18,6 +18,7 @@ cloudinary.config(
     api_secret=os.getenv("CLOUDINARY_API_SECRET")
 )
 
+# New Gemini Client
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 IG_ID = os.getenv("IG_BUSINESS_ID")
 TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
@@ -137,7 +138,9 @@ def is_quiet_hours():
 # --- CORE LOGIC ---
 def post_category_wise_news():
     global IS_POSTING_BUSY
-    if IS_POSTING_BUSY or is_quiet_hours(): return
+    if IS_POSTING_BUSY or is_quiet_hours():
+        logger.info("Skipping: Either busy or Quiet Hours (1AM-6AM IST)")
+        return
     try:
         IS_POSTING_BUSY = True
         posted_ids = load_posted()
@@ -153,15 +156,17 @@ def post_category_wise_news():
                 res = requests.post(f"https://graph.facebook.com/v18.0/{IG_ID}/media", 
                                     data={"image_url": img_url, "caption": e.title, "access_token": TOKEN}).json()
                 if "id" in res:
-                    time.sleep(40) # Meta processing
+                    time.sleep(45) # Meta processing delay
                     requests.post(f"https://graph.facebook.com/v18.0/{IG_ID}/media_publish", 
                                   data={"creation_id": res["id"], "access_token": TOKEN})
                     posted_ids.add(e.link)
                     save_posted(posted_ids)
-                    time.sleep(900) # 15 min gap
+                    logger.info(f"Successfully posted: {e.title}")
+                    time.sleep(1200) # 20 min gap between posts
+    except Exception as ex:
+        logger.error(f"Worker Error: {ex}")
     finally:
         IS_POSTING_BUSY = False
-
 
 
 
@@ -544,32 +549,40 @@ def admin():
     """
 
 
-# Create a function to run the loop
-def run_background_worker():
-    print("🚀 Background Worker Thread Started")
+def worker_loop():
     while True:
-        try:
-            post_category_wise_news()
-        except Exception as e:
-            print(f"Worker Error: {e}")
-        
-        # Wait 1 hour (3600 seconds)
-        time.sleep(3600)
-
-
+        post_category_wise_news()
+        time.sleep(3600) # Check every hour
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    threading.Thread(target=lambda: [time.sleep(10), post_category_wise_news()], daemon=True).start()
+    threading.Thread(target=worker_loop, daemon=True).start()
     yield
 
 app = FastAPI(lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return "<h1>TrendScope is running 24/7</h1><p>Check Instagram for updates.</p>"
+    now = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
+    return f"""
+    <html>
+    <head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
+    body{{font-family:Arial; text-align:center; padding:50px; background:#f1f3f6;}}
+    .status{{background:white; padding:20px; border-radius:15px; box-shadow:0 4px 10px rgba(0,0,0,0.1); display:inline-block;}}
+    </style></head>
+    <body>
+        <div class="status">
+            <h1>TrendScope AI 🇮🇳</h1>
+            <p>Status: <b>Active (24/7)</b></p>
+            <p>Current IST Time: {now}</p>
+            <hr>
+            <p>Quiet Hours: 1 AM - 6 AM IST (No posting)</p>
+        </div>
+    </body>
+    </html>
+    """
 
 @app.get("/cron/hourly")
 def cron():
     threading.Thread(target=post_category_wise_news).start()
-    return {"status": "triggered"}
+    return {"status": "Manual post cycle triggered"}
