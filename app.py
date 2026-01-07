@@ -1,15 +1,37 @@
-import json, logging, os, random, re, threading, time, uuid, requests, feedparser, pytz
+print("APP.PY LOADED FROM:", __file__)
+
+# --- 1. ALL IMPORTS FIRST ---
+import json
+import logging
+import os
+import random
+import re
+import threading
+import time
+import uuid
+import requests
+import feedparser
+import pytz
 from datetime import datetime
 from contextlib import asynccontextmanager
+
+import cloudinary
+import cloudinary.uploader
+from google import genai
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-import cloudinary.uploader
-from google import genai
+
 from image_generator import generate_news_image
 
+# --- 2. LOAD CONFIGURATION ---
 load_dotenv()
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+api_key_val = os.getenv("GEMINI_API_KEY")
+
+# Initialize the client with the explicit key
+client = genai.Client(api_key=api_key_val)
 logger = logging.getLogger("uvicorn.error")
 
 cloudinary.config(
@@ -17,104 +39,82 @@ cloudinary.config(
     api_key=os.getenv("CLOUDINARY_API_KEY"),
     api_secret=os.getenv("CLOUDINARY_API_SECRET")
 )
+# --- MISSING CLOUDINARY UPLOAD FUNCTION ---
 
-# New Gemini Client
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-IG_ID = os.getenv("IG_BUSINESS_ID")
-TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+def upload_image_to_cloudinary(local_path):
+    try:
+        # We use 'use_filename=True' to help with SEO and Meta crawling
+        res = cloudinary.uploader.upload(
+            local_path, 
+            folder="trendscope",
+            resource_type="image",
+            access_mode="public" # 🚨 CRITICAL: Forces the image to be public
+        )
+        
+        public_url = res.get("secure_url") # 🚨 Use secure_url for HTTPS
+        print(f"DEBUG: Cloudinary Image URL -> {public_url}")
+        return public_url
+    except Exception as e:
+        logger.error(f"Cloudinary Error: {e}")
+        return None
+# Change the client initialization at the top to this:
+
+IG_BUSINESS_ID = os.getenv("IG_BUSINESS_ID")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+
+# --- 3. GLOBAL VARIABLES ---
+# --- 3. GLOBAL VARIABLES ---
+NEWS_CACHE = {}
+IS_POSTING_BUSY = False 
 POSTED_FILE = "posted.json"
-IS_POSTING_BUSY = False
 
+# Ensure the dictionary is opened with { and every line ends with a comma
 RSS_SOURCES = {
+    "GoogleLive": "https://news.google.com/rss/search?q=when:1h+breaking+news+India&hl=en-IN&gl=IN&ceid=IN:en",
     "Hindustan Times": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
     "Times of India": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-    "NDTV": "https://feeds.feedburner.com/ndtvnews-india-news"
+    "The Hindu": "https://www.thehindu.com/news/national/feeder/default.rss",
+    "Indian Express": "https://indianexpress.com/feed/",
+    "NDTV": "https://feeds.feedburner.com/ndtvnews-india-news",
 }
 
-def ai_short_news(text):
-    try:
-        if not GEMINI_API_KEY:
-            raise Exception("No Gemini key")
+POST_CONFIG = {"Sports": 1, "Business": 1, "Tech": 1}
 
-        prompt = f"Summarize this Indian news in 15-20 simple words:\n{text}"
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        res = model.generate_content(prompt)
+# --- 4. THE LIFESPAN FUNCTION ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This creates the folder on Render to prevent "Directory not found" errors
+    os.makedirs(os.path.join("images", "output"), exist_ok=True)
+    # This starts your background worker automatically
+    threading.Thread(target=run_background_worker, daemon=True).start()
+    yield
 
-        if not res or not res.text:
-            raise Exception("Empty Gemini response")
+# --- 5. DEFINE THE APP (CRITICAL: MUST BE ABOVE ALL @APP ROUTES) ---
+app = FastAPI(lifespan=lifespan)
 
-        return res.text.strip()
+# --- 6. NOW YOU CAN START YOUR ROUTES ---
+class ImageRequest(BaseModel):
+    headline: str
+    description: str
+    image_url: str | None = None
 
-    except Exception as e:
-        # SAFE FALLBACK (never crash UI)
-        words = re.findall(r"\w+", text)
-        return " ".join(words[:22]) + "."
+@app.post("/api/generate-image")
+def api_generate_image(data: ImageRequest):
+    # This code MUST be indented (pushed to the right)
+    filename = f"{uuid.uuid4().hex}.png"
+    path = generate_news_image(
+        headline=data.headline,
+        description=data.description,
+        image_url=data.image_url or "",
+        output_name=filename
+    )
+    return {
+        "status": "success",
+        "image_path": path
+    }
 
-def ai_caption(text):
-    try:
-        if not GEMINI_API_KEY:
-            raise Exception("No Gemini key")
-
-        prompt = (
-            "Write a short Instagram caption (max 2 lines) for this Indian news. "
-            "Add 3 relevant hashtags.\n\nNews:\n" + text
-        )
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        res = model.generate_content(prompt)
-
-        if not res or not res.text:
-            raise Exception("Empty Gemini response")
-
-        return res.text.strip()
-
-    except Exception:
-        return ai_short_news(text) + "\n\n#IndiaNews"
-
-
-def ai_category(text):
-    t = text.lower()
-    if "cricket" in t: return "Sports"
-    if "market" in t: return "Business"
-    if "tech" in t or "ai" in t: return "Tech"
-    return "India"
-
-def ai_trending_score(title):
-    return min(95, 40 + sum(k in title.lower() for k in ["india","court","market","cricket"]) * 10)
-
-def extract_image(entry):
-    if "media_content" in entry and entry.media_content:
-        return entry.media_content[0].get("url")
-    return "https://via.placeholder.com/400x200?text=News"
-
-def fetch_news():
-    global NEWS_CACHE
-    NEWS_CACHE = {}
-    out, i = [], 0
-    for src, url in RSS_SOURCES.items():
-        feed = feedparser.parse(url)
-        for e in feed.entries[:6]:
-            art = {
-                "id": i,
-                "title": e.title,
-                "summary": e.get("summary", e.title),
-                "link": e.link,
-                "image": extract_image(e),
-                "trend": ai_trending_score(e.title),
-                "category": ai_category(e.title)
-            }
-            NEWS_CACHE[i] = art
-            out.append(art)
-            i += 1
-    return out
-# ================== AUTO POST CONFIG ==================
-
-POST_CONFIG = {
-    "Sports": 1,
-    "Business": 1,
-    "Tech": 1,
-}
-
-POST_DELAY_SECONDS = 900  # gap between posts to avoid spam
+# This line should NOT be indented (it is outside the function)
+POST_DELAY_SECONDS = 900
 
 # ======================================================
 
@@ -135,36 +135,147 @@ def is_quiet_hours():
     now = datetime.now(pytz.timezone('Asia/Kolkata'))
     return 1 <= now.hour < 6
 
+# --- MISSING NEWS LOGIC ---
+
+def ai_category(text):
+    t = text.lower()
+    if any(k in t for k in ["cricket", "ipl", "score", "match"]): return "Sports"
+    if any(k in t for k in ["market", "sensex", "nifty", "economy"]): return "Business"
+    if any(k in t for k in ["tech", "ai", "iphone", "google"]): return "Tech"
+    return "India"
+
+def ai_trending_score(title):
+    # Basic logic to give a trend percentage
+    return min(95, 40 + sum(k in title.lower() for k in ["india","court","modi","cricket"]) * 10)
+
+def extract_image(entry):
+    # Try to find an image in the RSS feed entry
+    if "media_content" in entry and entry.media_content:
+        return entry.media_content[0].get("url")
+    return "https://images.unsplash.com/photo-1504711434969-e33886168f5c"
+
+def fetch_news():
+    global NEWS_CACHE
+    NEWS_CACHE = {}
+    out, i = [], 0
+    # Make sure RSS_SOURCES is defined at the top of your file
+    for src, url in RSS_SOURCES.items():
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries[:6]:
+                art = {
+                    "id": i,
+                    "title": e.title,
+                    "summary": e.get("summary", e.title),
+                    "link": e.link,
+                    "image": extract_image(e),
+                    "trend": ai_trending_score(e.title),
+                    "category": ai_category(e.title)
+                }
+                NEWS_CACHE[i] = art
+                out.append(art)
+                i += 1
+        except Exception as e:
+            logger.error(f"Error fetching from {src}: {e}")
+            continue
+    return out
+
+
+
+def ai_caption(text):
+    prompt = f"""
+    Rewrite this news for an Instagram Breaking News alert.
+    
+    INSTRUCTIONS:
+    - Language: Simple, easy, NO jargon.
+    - Start: Use '🚨 BREAKING' or '🚨 JUST IN'.
+    - Tone: Emotional and urgent.
+    - Limit: 15-20 words total.
+    
+    Original News: {text}
+    """
+    try:
+        res = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        return res.text.strip().replace('"', '') # Removes quotes
+    except:
+        return f"🚨 JUST IN: {text[:50]}... Stay tuned for updates! #IndiaNews"
+
+        
+def ai_instagram_rewrite(text):
+    """Rewrites news into short, emotional, jargon-free Instagram style."""
+    prompt = f"""
+    Rewrite this news for an Instagram Breaking News alert.
+    
+    STYLE:
+    - Start with 🚨 BREAKING or 🚨 JUST IN.
+    - Short, punchy sentences. Emotional tone.
+    - NO jargon. Simple language.
+    - MAX 18 words total.
+    
+    News: {text}
+    """
+    try:
+        # We use gemini-1.5-flash as it is more stable for this SDK
+        res = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
+        return res.text.strip().replace('"', '')
+    except Exception as e:
+        logger.error(f"AI Rewrite Error: {e}")
+        # Fallback content if the API fails so the post isn't empty
+        return f"🚨 BREAKING: {text[:60]}... More updates soon. #IndiaNews"
+
 # --- CORE LOGIC ---
 def post_category_wise_news():
     global IS_POSTING_BUSY
     if IS_POSTING_BUSY or is_quiet_hours():
-        logger.info("Skipping: Either busy or Quiet Hours (1AM-6AM IST)")
         return
     try:
         IS_POSTING_BUSY = True
+        news = fetch_news()
         posted_ids = load_posted()
-        for src, url in RSS_SOURCES.items():
-            feed = feedparser.parse(url)
-            for e in feed.entries[:2]:
-                if e.link in posted_ids: continue
+        
+        for n in news:
+            if n["link"] in posted_ids: continue
+
+            # 🚨 STEP 1: Generate AI Breaking News Style Content
+            # This follows your request: Short, Emotional, No Jargon
+            breaking_headline = n["title"].split('|')[0].upper() # Clean the title
+            insta_style_desc = ai_instagram_rewrite(n["summary"]) 
+
+            # 🚨 STEP 2: Generate Image
+            # Generate a unique filename using uuid
+            filename = f"post_{uuid.uuid4().hex}.png"
+            local_img_path = generate_news_image(
+                headline=breaking_headline,
+                description=insta_style_desc,
+                image_url=n["image"],
+                output_name=filename
+            )
+
+            # Check if file exists before uploading
+            if os.path.exists(local_img_path):
+                # 🚨 STEP 3: Upload to Cloudinary
+                # Make sure this function returns the 'secure_url'
+                public_url = upload_image_to_cloudinary(local_img_path)
                 
-                img_path = generate_news_image(e.title, e.get("summary", e.title), "https://via.placeholder.com/500", f"{uuid.uuid4().hex}.png")
-                img_url = cloudinary.uploader.upload(img_path)["secure_url"]
-                
-                # Instagram Post
-                res = requests.post(f"https://graph.facebook.com/v18.0/{IG_ID}/media", 
-                                    data={"image_url": img_url, "caption": e.title, "access_token": TOKEN}).json()
-                if "id" in res:
-                    time.sleep(45) # Meta processing delay
-                    requests.post(f"https://graph.facebook.com/v18.0/{IG_ID}/media_publish", 
-                                  data={"creation_id": res["id"], "access_token": TOKEN})
-                    posted_ids.add(e.link)
+                # 🚨 STEP 4: Post to Instagram
+                caption = f"{insta_style_desc}\n\n#BreakingNews #India #TrendScope"
+                ig_res = post_to_instagram(public_url, caption)
+
+                if "id" in ig_res:
+                    posted_ids.add(n["link"])
                     save_posted(posted_ids)
-                    logger.info(f"Successfully posted: {e.title}")
-                    time.sleep(1200) # 20 min gap between posts
-    except Exception as ex:
-        logger.error(f"Worker Error: {ex}")
+                    logger.info(f"✅ Success: {n['title']}")
+                    
+                    # Cleanup local file to save space on Render
+                    os.remove(local_img_path)
+                    
+                    time.sleep(1200) # 20 min gap
+            else:
+                logger.error(f"Image File Not Found: {local_img_path}")
+
     finally:
         IS_POSTING_BUSY = False
 
@@ -549,38 +660,17 @@ def admin():
     """
 
 
-def worker_loop():
+# --- WORKER THREAD ---
+def run_background_worker():
     while True:
-        post_category_wise_news()
-        time.sleep(3600) # Check every hour
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    threading.Thread(target=worker_loop, daemon=True).start()
-    yield
-
-app = FastAPI(lifespan=lifespan)
-
-@app.get("/", response_class=HTMLResponse)
-def home():
-    now = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
-    return f"""
-    <html>
-    <head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
-    body{{font-family:Arial; text-align:center; padding:50px; background:#f1f3f6;}}
-    .status{{background:white; padding:20px; border-radius:15px; box-shadow:0 4px 10px rgba(0,0,0,0.1); display:inline-block;}}
-    </style></head>
-    <body>
-        <div class="status">
-            <h1>TrendScope AI 🇮🇳</h1>
-            <p>Status: <b>Active (24/7)</b></p>
-            <p>Current IST Time: {now}</p>
-            <hr>
-            <p>Quiet Hours: 1 AM - 6 AM IST (No posting)</p>
-        </div>
-    </body>
-    </html>
-    """
+        try:
+            # Check for news every 5 minutes (300 seconds)
+            post_category_wise_news()
+            logger.info("Sleeping 5 minutes...")
+            time.sleep(300) 
+        except Exception as e:
+            logger.error(f"Worker Exception: {e}")
+            time.sleep(60) # Wait 1 min if error
 
 @app.get("/cron/hourly")
 def cron():
