@@ -79,27 +79,25 @@ def generate_news_image(headline, description, image_url, output_name="post.png"
         draw.text((400, 370), "BREAKING NEWS", fill=GRAY_TEXT, font=get_font(30))
 
     # 4. SMART TEXT LOGIC (Optimized to prevent cutting)
-    def generate_news_image(headline, image_url, output_name):
-    # 1. Base Canvas
+def generate_news_image(headline, image_url, output_name):
+    # 1. Canvas (Indented 4 spaces)
     img = Image.new("RGB", (1080, 1080), (15, 17, 26))
     draw = ImageDraw.Draw(img)
     
-    # 2. Draw News Image (Fixed box to prevent cutting)
+    # 2. News Image Box
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(image_url, headers=headers, timeout=10)
-        photo = Image.open(BytesIO(r.content)).convert("RGB")
-        # Resize and crop to top box
-        photo = photo.resize((960, 500), Image.Resampling.LANCZOS)
+        photo = Image.open(BytesIO(r.content)).convert("RGB").resize((960, 500))
         img.paste(photo, (60, 140))
     except:
-        draw.rectangle([60, 140, 1020, 640], fill=(30, 40, 60))
+        draw.rectangle([60, 140, 1020, 640], fill=(40, 50, 80))
 
-    # 3. AUTO-ADJUST TEXT LOGIC (Fixes the cutting issue)
-    def draw_rvcj_headline(text, y_pos, max_h):
-        size = 80 # Start Big (RVCJ Style)
-        while size > 25:
-            font = get_font(size, bold=True)
+    # 3. Auto-Adjust Text (Prevents cutting)
+    def draw_rvcj_text(text, y_pos, max_h, initial_size):
+        size = initial_size
+        while size > 20:
+            font = get_font(size, True)
             words = text.split()
             lines, current_line = [], []
             for word in words:
@@ -110,21 +108,18 @@ def generate_news_image(headline, description, image_url, output_name="post.png"
                     lines.append(' '.join(current_line))
                     current_line = [word]
             lines.append(' '.join(current_line))
-            
             if len(lines) * (size + 15) <= max_h:
                 for line in lines:
                     draw.text((60, y_pos), line, fill=(255, 255, 255), font=font)
                     y_pos += size + 15
                 return y_pos
-            size -= 5 # Shrink font if it doesn't fit
+            size -= 5
         return y_pos
 
-    # Draw the Big Headline in the bottom section
-    draw_rvcj_headline(headline.upper(), 680, 300)
-
-    # 4. Branding
-    draw.text((60, 1020), "FOLLOW @TRENDSCOPE | INDIA", fill=(0, 210, 255), font=get_font(28, True))
-
+    # Headline at bottom
+    draw_rvcj_text(headline.upper(), 680, 300, 75)
+    draw.text((60, 1020), "FOLLOW @TRENDSCOPE", fill=(0, 210, 255), font=get_font(28, True))
+    
     save_path = os.path.join(OUTPUT_DIR, output_name)
     img.save(save_path)
     return save_path

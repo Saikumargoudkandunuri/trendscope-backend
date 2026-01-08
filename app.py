@@ -206,45 +206,82 @@ def ai_rvcj_converter(text):
         return {"headline": "🚨 BIG BREAKING NEWS!", "description": f"Dosto, badi khabar aa rahi hai: {text[:50]}..."}
     
 # --- CORE LOGIC ---
+# --- CORRECTED CORE ENGINE ---
+# --- CORRECTED CORE ENGINE ---
 def post_category_wise_news():
     global IS_POSTING_BUSY
-    if IS_POSTING_BUSY or is_quiet_hours(): return
+    
+    # 1. STOP if another process is running or if it's Quiet Hours (1AM-6AM IST)
+    if IS_POSTING_BUSY or is_quiet_hours():
+        logger.info("Skipping cycle: Bot is busy or it is Quiet Hours in India.")
+        return
+
     try:
         IS_POSTING_BUSY = True
-        news = fetch_news()
+        logger.info("🚀 Starting RVCJ Auto-Post Cycle...")
+        
+        # 2. Fetch the latest news and the list of what we already posted
+        news_items = fetch_news()
         posted_ids = load_posted()
         
-        for n in news:
-            if n["link"] in posted_ids: continue
+        for n in news_items:
+            # Skip if we already posted this link
+            if n["link"] in posted_ids:
+                continue
 
             try:
-                # 1. Generate RVCJ Content
-                content = ai_rvcj_converter(n["summary"])
+                logger.info(f"Processing: {n['title']}")
+
+                # 3. Convert news to RVCJ Style (Hinglish Headline & Description)
+                rvcj_data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
-                # 2. UNIQUE FILENAME (Fixes repeating image issue)
-                unique_name = f"rvcj_{uuid.uuid4().hex}.png"
+                # 4. Generate a UNIQUE filename (Fixes the repeating image bug)
+                unique_filename = f"rvcj_{uuid.uuid4().hex}.png"
+
+                # 5. Generate the branded image
+                # The headline goes ON the image
+                image_path = generate_news_image(
+                    headline=rvcj_data['headline'],
+                    image_url=n["image"],
+                    output_name=unique_filename
+                )
+
+                # 6. Upload the image to Cloudinary
+                public_url = upload_image_to_cloudinary(image_path)
                 
-                # 3. Create Image
-                img_path = generate_news_image(content['headline'], n["image"], unique_name)
-                
-                # 4. Upload to Cloudinary
-                url = upload_image_to_cloudinary(img_path)
-                
-                # 5. Post to Instagram (AI Description becomes the Caption)
-                ig_res = post_to_instagram(url, content['description'])
-                
+                if not public_url:
+                    logger.error("Cloudinary upload failed. skipping item.")
+                    continue
+
+                # 7. Post to Instagram
+                # We use the RVCJ description as the Instagram Caption/Body
+                ig_res = post_to_instagram(public_url, rvcj_data['description'])
+
                 if "id" in ig_res:
+                    # ✅ Success: Save ID immediately so we don't repeat it
                     posted_ids.add(n["link"])
                     save_posted(posted_ids)
-                    if os.path.exists(img_path): os.remove(img_path)
-                    logger.info(f"✅ RVCJ Post Success: {content['headline']}")
+                    logger.info(f"✅ RVCJ Post Success: {rvcj_data['headline']}")
                     
-                    # 20 min gap to avoid spam
+                    # Cleanup: Delete the image from your laptop/Render to save space
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+
+                    # 8. Natural Delay: Wait 20 minutes before the next post 
+                    # This prevents Instagram from banning you for spamming
+                    logger.info("🕒 Waiting 20 minutes before checking next item...")
                     time.sleep(1200) 
+                else:
+                    logger.error(f"❌ Instagram API Error: {ig_res}")
+
             except Exception as e:
-                logger.error(f"Post Error: {e}")
+                logger.error(f"⚠️ Failed to process item: {e}")
                 continue
+                
+    except Exception as e:
+        logger.error(f"🛑 Critical Engine Error: {e}")
     finally:
+        # Unlock the engine so it can run again in the next cycle
         IS_POSTING_BUSY = False
 
 def ai_rvcj_style(text):
