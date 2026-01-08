@@ -22,7 +22,7 @@ import cloudinary
 import cloudinary.uploader
 from google import genai
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request, Response # Add 'Request' here
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -376,28 +376,29 @@ app = FastAPI(lifespan=lifespan)
 # ======================================================
 
 @app.get("/", response_class=HTMLResponse)
-def home(category: str = Query(None), request: requests.Request = None):
-    # --- 🚨 SPEED FIX FOR CRON JOBS 🚨 ---
-    # If the visitor is a bot (Cron-job or UptimeRobot), give them a tiny page 
-    # so the server responds in 0.1 seconds.
-    user_agent = ""
-    if request and "user-agent" in request.headers:
-        user_agent = request.headers["user-agent"].lower()
+def home(request: Request, category: str = Query(None)): # Change requests.Request to Request
+    # --- 🚨 SPEED FIX FOR BOTS 🚨 ---
+    user_agent = request.headers.get("user-agent", "").lower()
     
+    # If the visitor is a bot (Cron-job or UptimeRobot), give them a tiny page 
     if "cron" in user_agent or "uptime" in user_agent:
         return "<html><body>TrendScope Engine is Awake</body></html>"
 
     # --- REGULAR VISITOR LOGIC ---
-    # Only do the heavy news fetching if a real human is visiting the site
     try:
-        news = fetch_news(filter_posted=False)
+        # Pass filter_posted=False so the website always shows news
+        news = fetch_news(filter_posted=False) 
         news.sort(key=lambda x: x["trend"], reverse=True)
+        
         if category:
             news = [n for n in news if n["category"] == category]
+        
         flash = news[:5]
     except Exception as e:
         logger.error(f"Home Page Error: {e}")
-        return "<html><body><h1>Site under heavy load. Please refresh.</h1></body></html>"
+        return "<html><body><h1>Site Busy. Please refresh.</h1></body></html>"
+
+    # ... (the rest of your return f""" HTML code stays the same)
 
     return f"""
 <html>
