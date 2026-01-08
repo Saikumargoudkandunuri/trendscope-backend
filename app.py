@@ -202,23 +202,27 @@ def ai_caption(text):
 
         
 def ai_instagram_rewrite(text):
-    """The main RVCJ-style engine"""
+    """Rewrites news into RVCJ-style Hinglish."""
     prompt = f"""
-    Rewrite this news in the style of RVCJ Instagram.
-    RULES:
-    1. Start with a viral hook: 🚨 BIG BREAKING, 🔥 TRENDING, or 😱 DID YOU KNOW?
-    2. Use short, punchy, emotional sentences.
-    3. NO JARGON. Use simple language.
-    4. Max 18 words total.
+    Rewrite this for Instagram in RVCJ style.
+    - Start with 🚨 BREAKING or 🔥 TRENDING.
+    - Use emotional Hinglish.
+    - NO jargon. Simple language.
+    - Max 18 words.
     
     News: {text}
     """
     try:
-        res = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
-        return res.text.strip().replace('"', '')
+        # 🚨 CHANGE: Use gemini-2.0-flash
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt
+        )
+        return response.text.strip().replace('"', '')
     except Exception as e:
         logger.error(f"AI Rewrite Error: {e}")
-        return f"🚨 BIG BREAKING: {text[:50]}..."
+        # If it still fails, use a clean emergency fallback
+        return f"🚨 BIG BREAKING: {text[:50]}... Read more!"
 
 # These two aliases ensure your website routes don't crash
 def ai_short_news(text):
