@@ -47,11 +47,6 @@ cloudinary.config(
 api_key_val = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key_val)
 
-# --- SUPABASE CONFIG ---
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 # --- UPDATE YOUR CONFIGURATION ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -59,6 +54,8 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 # Instagram Setup
 IG_BUSINESS_ID = os.getenv("IG_BUSINESS_ID")
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+
+
 
 # ======================================================
 # 3. GLOBAL VARIABLES & RSS SOURCES
@@ -89,27 +86,51 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def is_already_posted(url):
-    """Check Supabase for the URL"""
-    try:
-        res = supabase.table("posted_news").select("url").eq("url", url).execute()
-        return len(res.data) > 0
-    except Exception as e:
-        logger.error(f"Supabase Check Error: {e}")
-        return False
+# ======================================================
+# SUPABASE BRIDGE FUNCTIONS (FIXES NAMEERROR)
+# ======================================================
 
-def mark_as_posted(url):
-    """Save the URL to Supabase forever"""
+def load_posted():
+    """Fetches all previously posted URLs from Supabase to prevent repeats"""
     try:
-        supabase.table("posted_news").insert({"url": url}).execute()
-        logger.info(f"✅ URL saved to Supabase Vault")
+        # We fetch only the 'url' column from Supabase
+        res = supabase.table("posted_news").select("url").execute()
+        # Convert the list of dictionaries into a simple Set of URLs
+        return {item['url'] for item in res.data}
+    except Exception as e:
+        logger.error(f"Supabase Load Error: {e}")
+        return set()
+
+def save_posted(url):
+    """Saves a new URL into the Supabase Vault immediately"""
+    try:
+        # Check if input is a set (old logic) or a string (new logic)
+        if isinstance(url, set) or isinstance(url, list):
+            # If the code passes a set, we take the last added item
+            url_to_save = list(url)[-1]
+        else:
+            url_to_save = url
+
+        supabase.table("posted_news").insert({"url": url_to_save}).execute()
+        logger.info(f"✅ URL locked in Supabase: {url_to_save}")
     except Exception as e:
         logger.error(f"Supabase Save Error: {e}")
 
+# This alias ensures that if your code calls 'mark_as_posted', it still works
+def mark_as_posted(url):
+    return save_posted(url)
+
+def is_already_posted(url):
+    """Check if URL exists in our Supabase Vault"""
+    posted_set = load_posted()
+    return url in posted_set
+
 def is_quiet_hours():
     """Logic to stop posting between 1 AM and 6 AM IST"""
-    now = datetime.now(pytz.timezone('Asia/Kolkata'))
-    return False
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+    # Returns True if hour is 1, 2, 3, 4, or 5
+    return 1 <= now.hour < 6
 
 def upload_image_to_cloudinary(local_path):
     try:
@@ -207,19 +228,20 @@ def extract_image(entry):
         return entry.media_content[0].get("url")
     return "https://images.unsplash.com/photo-1504711434969-e33886168f5c"
 
-def fetch_news():
+def fetch_news(filter_posted=False):
     global NEWS_CACHE
     NEWS_CACHE = {}
     out, i = [], 0
-    posted_ids = load_posted() # Load what we know
+    
+    # Only load posted_ids if we actually want to filter them
+    posted_ids = load_posted() if filter_posted else set()
     
     for src, url in RSS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
-            # Only look at the top 3 items per source to ensure they are FRESH
-            for e in feed.entries[:3]:
-                # 🚨 CRITICAL: If we already know this link, skip it IMMEDIATELY
-                if e.link in posted_ids:
+            for e in feed.entries[:6]:
+                # If filtering is ON, skip already posted links
+                if filter_posted and e.link in posted_ids:
                     continue
                     
                 art = {
@@ -231,6 +253,7 @@ def fetch_news():
                     "trend": ai_trending_score(e.title), 
                     "category": ai_category(e.title)
                 }
+                NEWS_CACHE[i] = art
                 out.append(art)
                 i += 1
         except: continue
@@ -278,102 +301,52 @@ def post_to_instagram(image_url, caption):
 
     logger.info(f"PUBLISH RESPONSE: {publish_res}")
     return publish_res
-def is_already_posted(url):
-    """Check Supabase to see if we already posted this story"""
-    try:
-        # Look for the URL in the 'posted_news' table
-        res = supabase.table("posted_news").select("url").eq("url", url).execute()
-        return len(res.data) > 0
-    except Exception as e:
-        logger.error(f"Supabase Check Error: {e}")
-        return False
-
-def mark_as_posted(url):
-    """Save the URL to Supabase forever so we don't repeat it"""
-    try:
-        supabase.table("posted_news").insert({"url": url}).execute()
-        logger.info(f"✅ URL locked in Supabase Vault")
-    except Exception as e:
-        logger.error(f"Supabase Save Error: {e}")
 
 def post_category_wise_news():
     global IS_POSTING_BUSY
-    
-    # 1. 🛡️ PROTECTION: Stop if busy or if it is Quiet Hours (1 AM - 6 AM IST)
-    # This prevents looking like a bot and respects your sleep schedule.
     if IS_POSTING_BUSY or is_quiet_hours():
-        logger.info("Engine Paused: Either busy or Quiet Hours (1AM-6AM IST)")
         return
 
     try:
         IS_POSTING_BUSY = True
-        logger.info("🚜 RVCJ Engine Started: Checking for fresh news...")
+        logger.info("🚜 RVCJ Engine Started...")
         
-        # 2. 📡 FETCH: Get news and check our Supabase Vault
-        news_items = fetch_news()
+        # 🚨 FIX: Fetch ONLY news that hasn't been posted yet
+        news_items = fetch_news(filter_posted=True)
         
         for n in news_items:
-            # 🚨 DATABASE CHECK: Skip if Supabase says we already posted this link
-            if is_already_posted(n["link"]):
-                continue
-
             try:
-                logger.info(f"Processing New Story: {n['title']}")
-
-                # 3. 🧠 AI: Convert news into RVCJ Hinglish (Headline + Description)
-                # 'headline' goes on the image, 'description' is the post body.
-                rvcj_data = ai_rvcj_style(n.get("summary", n["title"]))
+                # 🚨 FIX: Corrected function name from ai_rvcj_style to ai_rvcj_converter
+                data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
-                # 4. 🆔 UNIQUE NAME: Generate a unique ID for this image
-                # This ensures Cloudinary and Render never overwrite old files.
                 unique_filename = f"rvcj_{uuid.uuid4().hex}.png"
-
-                # 5. 🎨 IMAGE: Generate the branded RVCJ image
                 image_path = generate_news_image(
-                    headline=rvcj_data['headline'],
+                    headline=data['headline'],
                     image_url=n["image"],
                     output_name=unique_filename
                 )
 
-                # 6. ☁️ CLOUDINARY: Upload to the cloud
                 public_url = upload_image_to_cloudinary(image_path)
-                
-                if not public_url:
-                    logger.error("Cloudinary failed, skipping item.")
-                    continue
+                if not public_url: continue
 
-                # 7. 📸 INSTAGRAM: Post with Cache Buster
-                # Adding '?v=random' tricks Instagram into seeing a brand-new image
+                # Post to Instagram
                 cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
-                
-                # Use the AI-generated Hinglish description as the caption
-                ig_res = post_to_instagram(cache_buster_url, rvcj_data['description'])
+                ig_res = post_to_instagram(cache_buster_url, data['description'])
 
                 if "id" in ig_res:
-                    # ✅ SUCCESS: Save to Supabase so we NEVER post this again
                     mark_as_posted(n["link"])
+                    logger.info(f"✅ Posted Success: {data['headline']}")
+                    if os.path.exists(image_path): os.remove(image_path)
                     
-                    logger.info(f"🔥 RVCJ Post Successful: {rvcj_data['headline']}")
-                    
-                    # 🧹 CLEANUP: Delete the local file to keep Render fast
-                    if os.path.exists(image_path):
-                        os.remove(image_path)
-
-                    # 🕒 NATURAL GAP: Wait 20 minutes before the next post
-                    # This is the "Hardcore" way to avoid getting banned by Meta.
-                    logger.info("🕒 Waiting 20 minutes to maintain human-like behavior...")
+                    # Wait 20 mins between posts
                     time.sleep(1200) 
                 else:
-                    logger.error(f"❌ Meta API rejected the post: {ig_res}")
+                    logger.error(f"IG Error: {ig_res}")
 
             except Exception as e:
-                logger.error(f"⚠️ Failed to process specific news item: {e}")
+                logger.error(f"Item error: {e}")
                 continue
-                
-    except Exception as e:
-        logger.error(f"🛑 Critical Engine Crash: {e}")
     finally:
-        # Unlock the engine so it can run again in the next 5-minute cycle
         IS_POSTING_BUSY = False
 
 # ======================================================
