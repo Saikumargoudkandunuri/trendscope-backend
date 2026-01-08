@@ -182,60 +182,33 @@ def fetch_news():
 
 
 
-def ai_caption(text):
+def ai_rvcj_converter(text):
+    """Converts news into RVCJ Hinglish Style"""
     prompt = f"""
-    Rewrite this news for an Instagram Breaking News alert.
-    
-    INSTRUCTIONS:
-    - Language: Simple, easy, NO jargon.
-    - Start: Use '🚨 BREAKING' or '🚨 JUST IN'.
-    - Tone: Emotional and urgent.
-    - Limit: 15-20 words total.
-    
-    Original News: {text}
-    """
-    try:
-        res = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
-        return res.text.strip().replace('"', '') # Removes quotes
-    except:
-        return f"🚨 JUST IN: {text[:50]}... Stay tuned for updates! #IndiaNews"
-
-        
-def ai_instagram_rewrite(text):
-    """Rewrites news into RVCJ-style Hinglish."""
-    prompt = f"""
-    Rewrite this for Instagram in RVCJ style.
-    - Start with 🚨 BREAKING or 🔥 TRENDING.
-    - Use emotional Hinglish.
-    - NO jargon. Simple language.
-    - Max 18 words.
-    
+    Act as an RVCJ Instagram Content Creator. 
+    Convert this news into Hinglish (Hindi + English).
+    Return ONLY a JSON object:
+    {{
+      "headline": "A short viral Hinglish headline (MAX 10 words, e.g., 'Bhaari Nuksan! Mumbai mein Earthquake')",
+      "description": "Engaging Hinglish story for post body (MAX 30 words, start with 'Dosto...')"
+    }}
     News: {text}
     """
     try:
-        # 🚨 CHANGE: Use gemini-2.0-flash
-        response = client.models.generate_content(
+        # Use gemini-2.0-flash or gemini-1.5-flash
+        res = client.models.generate_content(
             model="gemini-2.0-flash", 
-            contents=prompt
+            contents=prompt,
+            config={'response_mime_type': 'application/json'}
         )
-        return response.text.strip().replace('"', '')
-    except Exception as e:
-        logger.error(f"AI Rewrite Error: {e}")
-        # If it still fails, use a clean emergency fallback
-        return f"🚨 BIG BREAKING: {text[:50]}... Read more!"
-
-# These two aliases ensure your website routes don't crash
-def ai_short_news(text):
-    return ai_instagram_rewrite(text)
-
-def ai_caption(text):
-    return ai_instagram_rewrite(text)
-
+        return json.loads(res.text)
+    except:
+        return {"headline": "🚨 BIG BREAKING NEWS!", "description": f"Dosto, badi khabar aa rahi hai: {text[:50]}..."}
+    
 # --- CORE LOGIC ---
 def post_category_wise_news():
     global IS_POSTING_BUSY
-    if IS_POSTING_BUSY or is_quiet_hours():
-        return
+    if IS_POSTING_BUSY or is_quiet_hours(): return
     try:
         IS_POSTING_BUSY = True
         news = fetch_news()
@@ -244,47 +217,61 @@ def post_category_wise_news():
         for n in news:
             if n["link"] in posted_ids: continue
 
-            # 🚨 STEP 1: Generate AI Breaking News Style Content
-            # This follows your request: Short, Emotional, No Jargon
-            breaking_headline = n["title"].split('|')[0].upper() # Clean the title
-            insta_style_desc = ai_instagram_rewrite(n["summary"]) 
-
-            # 🚨 STEP 2: Generate Image
-            # Generate a unique filename using uuid
-            filename = f"post_{uuid.uuid4().hex}.png"
-            local_img_path = generate_news_image(
-                headline=breaking_headline,
-                description=insta_style_desc,
-                image_url=n["image"],
-                output_name=filename
-            )
-
-            # Check if file exists before uploading
-            if os.path.exists(local_img_path):
-                # 🚨 STEP 3: Upload to Cloudinary
-                # Make sure this function returns the 'secure_url'
-                public_url = upload_image_to_cloudinary(local_img_path)
+            try:
+                # 1. Generate RVCJ Content
+                content = ai_rvcj_converter(n["summary"])
                 
-                # 🚨 STEP 4: Post to Instagram
-                caption = f"{insta_style_desc}\n\n#BreakingNews #India #TrendScope"
-                ig_res = post_to_instagram(public_url, caption)
-
+                # 2. UNIQUE FILENAME (Fixes repeating image issue)
+                unique_name = f"rvcj_{uuid.uuid4().hex}.png"
+                
+                # 3. Create Image
+                img_path = generate_news_image(content['headline'], n["image"], unique_name)
+                
+                # 4. Upload to Cloudinary
+                url = upload_image_to_cloudinary(img_path)
+                
+                # 5. Post to Instagram (AI Description becomes the Caption)
+                ig_res = post_to_instagram(url, content['description'])
+                
                 if "id" in ig_res:
                     posted_ids.add(n["link"])
                     save_posted(posted_ids)
-                    logger.info(f"✅ Success: {n['title']}")
+                    if os.path.exists(img_path): os.remove(img_path)
+                    logger.info(f"✅ RVCJ Post Success: {content['headline']}")
                     
-                    # Cleanup local file to save space on Render
-                    os.remove(local_img_path)
-                    
-                    time.sleep(1200) # 20 min gap
-            else:
-                logger.error(f"Image File Not Found: {local_img_path}")
-
+                    # 20 min gap to avoid spam
+                    time.sleep(1200) 
+            except Exception as e:
+                logger.error(f"Post Error: {e}")
+                continue
     finally:
         IS_POSTING_BUSY = False
 
-
+def ai_rvcj_style(text):
+    """The Ultimate RVCJ Style Converter"""
+    prompt = f"""
+    Convert this news into RVCJ Instagram Style.
+    Language: HINGLISH (Mixed Hindi & English).
+    
+    Format: Return ONLY a JSON object with:
+    1. "headline": A shocking/viral headline (MAX 8 words, Hinglish, e.g. 'Bhaari Nuksan! Mumbai mein Earthquake')
+    2. "description": An engaging post body (2-3 lines, Hinglish story style, e.g. 'Dosto, aaj subah Mumbai mein jhatke mehsoos kiye gaye. Log gharon se bahar nikal aaye. Savdhaan rahein!')
+    
+    News: {text}
+    """
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt,
+            config={'response_mime_type': 'application/json'}
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        logger.error(f"RVCJ Style Error: {e}")
+        return {
+            "headline": "🚨 BIG BREAKING NEWS!",
+            "description": f"Dosto, badi khabar aa rahi hai: {text[:50]}... Stay tuned for more updates! 🔥"
+        }
 
 import requests
 
@@ -669,13 +656,12 @@ def admin():
 def run_background_worker():
     while True:
         try:
-            # Check for news every 5 minutes (300 seconds)
             post_category_wise_news()
-            logger.info("Sleeping 5 minutes...")
+            # Change from 3600 (1 hour) to 300 (5 minutes)
+            logger.info("Checked for breaking news. Sleeping 5 minutes...")
             time.sleep(300) 
         except Exception as e:
-            logger.error(f"Worker Exception: {e}")
-            time.sleep(60) # Wait 1 min if error
+            time.sleep(60)
 
 @app.get("/cron/hourly")
 def cron():

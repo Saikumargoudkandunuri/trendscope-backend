@@ -79,16 +79,31 @@ def generate_news_image(headline, description, image_url, output_name="post.png"
         draw.text((400, 370), "BREAKING NEWS", fill=GRAY_TEXT, font=get_font(30))
 
     # 4. SMART TEXT LOGIC (Optimized to prevent cutting)
-    def draw_contained_text(text, start_y, max_height, initial_size, is_bold, color):
-        size = initial_size
-        while size > 18:  # Minimum legible size
-            font = get_font(size, is_bold)
+    def generate_news_image(headline, image_url, output_name):
+    # 1. Base Canvas
+    img = Image.new("RGB", (1080, 1080), (15, 17, 26))
+    draw = ImageDraw.Draw(img)
+    
+    # 2. Draw News Image (Fixed box to prevent cutting)
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(image_url, headers=headers, timeout=10)
+        photo = Image.open(BytesIO(r.content)).convert("RGB")
+        # Resize and crop to top box
+        photo = photo.resize((960, 500), Image.Resampling.LANCZOS)
+        img.paste(photo, (60, 140))
+    except:
+        draw.rectangle([60, 140, 1020, 640], fill=(30, 40, 60))
+
+    # 3. AUTO-ADJUST TEXT LOGIC (Fixes the cutting issue)
+    def draw_rvcj_headline(text, y_pos, max_h):
+        size = 80 # Start Big (RVCJ Style)
+        while size > 25:
+            font = get_font(size, bold=True)
             words = text.split()
             lines, current_line = [], []
-            
             for word in words:
                 test_line = ' '.join(current_line + [word])
-                # Max width is 960px
                 if draw.textbbox((0, 0), test_line, font=font)[2] <= 960:
                     current_line.append(word)
                 else:
@@ -96,36 +111,20 @@ def generate_news_image(headline, description, image_url, output_name="post.png"
                     current_line = [word]
             lines.append(' '.join(current_line))
             
-            # Check total height including spacing
-            line_height = size + 12
-            total_h = len(lines) * line_height
-            
-            if total_h <= max_height:
-                y = start_y
+            if len(lines) * (size + 15) <= max_h:
                 for line in lines:
-                    draw.text((60, y), line, fill=color, font=font)
-                    y += line_height
-                return y # Return the final Y position after drawing
-            
-            size -= 2 # Shrink and retry
-        return start_y
+                    draw.text((60, y_pos), line, fill=(255, 255, 255), font=font)
+                    y_pos += size + 15
+                return y_pos
+            size -= 5 # Shrink font if it doesn't fit
+        return y_pos
 
-    # --- Headline Drawing ---
-    # Max height: 210px (Safe zone 680 to 890)
-    headline_text = headline.upper()
-    next_y = draw_contained_text(headline_text, 680, 210, 68, True, TEXT_COLOR)
+    # Draw the Big Headline in the bottom section
+    draw_rvcj_headline(headline.upper(), 680, 300)
 
-    # --- Description Drawing ---
-    # Max height: 110px (Safe zone next_y to 1000)
-    # This uses your "No Jargon/Emotional" text from AI
-    draw_contained_text(description, next_y + 15, 110, 34, False, GRAY_TEXT)
+    # 4. Branding
+    draw.text((60, 1020), "FOLLOW @TRENDSCOPE | INDIA", fill=(0, 210, 255), font=get_font(28, True))
 
-    # 5. Footer (Locked at the bottom)
-    draw.line([60, 1010, 1020, 1010], fill=(50, 55, 75), width=2)
-    footer_text = "FOLLOW @TRENDSCOPE FOR INSTANT UPDATES"
-    draw.text((60, 1025), footer_text, fill=ACCENT_COLOR, font=get_font(26, True))
-
-    # 6. Save
     save_path = os.path.join(OUTPUT_DIR, output_name)
     img.save(save_path)
     return save_path
