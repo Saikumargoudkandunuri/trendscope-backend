@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from supabase import create_client, Client
 
 # Local Application Import for your design logic
 from image_generator import generate_news_image
@@ -45,6 +46,11 @@ cloudinary.config(
 # Gemini AI Setup (2026 SDK)
 api_key_val = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key_val)
+
+# --- SUPABASE CONFIG ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- UPDATE YOUR CONFIGURATION ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -76,14 +82,29 @@ POST_CONFIG = {"Sports": 1, "Business": 1, "Tech": 1}
 # 4. HELPER UTILITIES
 # ======================================================
 
-def load_posted():
-    if not os.path.exists(POSTED_FILE): return set()
-    try:
-        with open(POSTED_FILE, "r") as f: return set(json.load(f))
-    except: return set()
 
-def save_posted(ids):
-    with open(POSTED_FILE, "w") as f: json.dump(list(ids), f)
+
+# Initialize Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def is_already_posted(url):
+    """Check Supabase for the URL"""
+    try:
+        res = supabase.table("posted_news").select("url").eq("url", url).execute()
+        return len(res.data) > 0
+    except Exception as e:
+        logger.error(f"Supabase Check Error: {e}")
+        return False
+
+def mark_as_posted(url):
+    """Save the URL to Supabase forever"""
+    try:
+        supabase.table("posted_news").insert({"url": url}).execute()
+        logger.info(f"✅ URL saved to Supabase Vault")
+    except Exception as e:
+        logger.error(f"Supabase Save Error: {e}")
 
 def is_quiet_hours():
     """Logic to stop posting between 1 AM and 6 AM IST"""
@@ -190,20 +211,26 @@ def fetch_news():
     global NEWS_CACHE
     NEWS_CACHE = {}
     out, i = [], 0
+    posted_ids = load_posted() # Load what we know
+    
     for src, url in RSS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
-            for e in feed.entries[:6]:
+            # Only look at the top 3 items per source to ensure they are FRESH
+            for e in feed.entries[:3]:
+                # 🚨 CRITICAL: If we already know this link, skip it IMMEDIATELY
+                if e.link in posted_ids:
+                    continue
+                    
                 art = {
-                    "id": i,
-                    "title": e.title,
+                    "id": i, 
+                    "title": e.title, 
                     "summary": e.get("summary", e.title),
-                    "link": e.link,
+                    "link": e.link, 
                     "image": extract_image(e),
-                    "trend": ai_trending_score(e.title),
+                    "trend": ai_trending_score(e.title), 
                     "category": ai_category(e.title)
                 }
-                NEWS_CACHE[i] = art
                 out.append(art)
                 i += 1
         except: continue
@@ -214,66 +241,122 @@ def fetch_news():
 # ======================================================
 
 def post_to_instagram(image_url, caption):
-    # Step 1: Create Container
-    res = requests.post(
-        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
-        data={"image_url": image_url, "caption": caption, "access_token": PAGE_ACCESS_TOKEN}
-    ).json()
+    # FIX: Add a Cache Buster to the image URL
+    # This prevents Instagram from showing a previous post's image
+    cache_buster = f"{image_url}?v={random.randint(10000, 99999)}"
     
-    if "id" not in res: return res
+    logger.info(f"Uploading to Meta with Cache Buster: {cache_buster}")
 
-    # Step 2: Critical Wait for Image Processing
+    # STEP 1: Create media container
+    create_res = requests.post(
+        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
+        data={
+            "image_url": cache_buster, # Use the busted URL here
+            "caption": caption,
+            "access_token": PAGE_ACCESS_TOKEN
+        }
+    ).json()
+
+    if "id" not in create_res:
+        logger.error(f"CREATE ERROR: {create_res}")
+        return create_res
+
+    creation_id = create_res["id"]
+
+    # STEP 2: WAIT for Meta to process the image
+    # We use 45 seconds to be safe on Render's network
     time.sleep(45)
 
-    # Step 3: Publish
-    return requests.post(
+    # STEP 3: Publish media
+    publish_res = requests.post(
         f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
-        data={"creation_id": res["id"], "access_token": PAGE_ACCESS_TOKEN}
+        data={
+            "creation_id": creation_id,
+            "access_token": PAGE_ACCESS_TOKEN
+        }
     ).json()
+
+    logger.info(f"PUBLISH RESPONSE: {publish_res}")
+    return publish_res
 
 def post_category_wise_news():
     global IS_POSTING_BUSY
+    
+    # 1. 🛡️ PROTECTION: Stop if busy or if it is Quiet Hours (1 AM - 6 AM IST)
+    # This prevents looking like a bot and respects your sleep schedule.
     if IS_POSTING_BUSY or is_quiet_hours():
-        logger.info("Engine Paused: Busy or Quiet Hours (1AM-6AM IST)")
+        logger.info("Engine Paused: Either busy or Quiet Hours (1AM-6AM IST)")
         return
 
     try:
-        IS_POSTING_BUSY = false
-        logger.info("🚜 RVCJ Engine Waking Up...")
+        IS_POSTING_BUSY = True
+        logger.info("🚜 RVCJ Engine Started: Checking for fresh news...")
+        
+        # 2. 📡 FETCH: Get news and check our Supabase Vault
         news_items = fetch_news()
-        posted_ids = load_posted()
         
         for n in news_items:
-            if n["link"] in posted_ids: continue
+            # 🚨 DATABASE CHECK: Skip if Supabase says we already posted this link
+            if is_already_posted(n["link"]):
+                continue
 
             try:
-                # 1. RVCJ Hinglish Conversion
-                data = ai_rvcj_converter(n.get("summary", n["title"]))
+                logger.info(f"Processing New Story: {n['title']}")
+
+                # 3. 🧠 AI: Convert news into RVCJ Hinglish (Headline + Description)
+                # 'headline' goes on the image, 'description' is the post body.
+                rvcj_data = ai_rvcj_style(n.get("summary", n["title"]))
                 
-                # 2. Generate Unique Filename (UUID FIX)
-                unique_name = f"rvcj_{uuid.uuid4().hex}.png"
+                # 4. 🆔 UNIQUE NAME: Generate a unique ID for this image
+                # This ensures Cloudinary and Render never overwrite old files.
+                unique_filename = f"rvcj_{uuid.uuid4().hex}.png"
 
-                # 3. Build Image
-                path = generate_news_image(data['headline'], n["image"], unique_name)
+                # 5. 🎨 IMAGE: Generate the branded RVCJ image
+                image_path = generate_news_image(
+                    headline=rvcj_data['headline'],
+                    image_url=n["image"],
+                    output_name=unique_filename
+                )
 
-                # 4. Upload & Post
-                url = upload_image_to_cloudinary(path)
-                ig_res = post_to_instagram(url, data['description'])
+                # 6. ☁️ CLOUDINARY: Upload to the cloud
+                public_url = upload_image_to_cloudinary(image_path)
+                
+                if not public_url:
+                    logger.error("Cloudinary failed, skipping item.")
+                    continue
+
+                # 7. 📸 INSTAGRAM: Post with Cache Buster
+                # Adding '?v=random' tricks Instagram into seeing a brand-new image
+                cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
+                
+                # Use the AI-generated Hinglish description as the caption
+                ig_res = post_to_instagram(cache_buster_url, rvcj_data['description'])
 
                 if "id" in ig_res:
-                    posted_ids.add(n["link"])
-                    save_posted(posted_ids)
-                    if os.path.exists(path): os.remove(path)
-                    logger.info(f"✅ RVCJ SUCCESS: {data['headline']}")
-                    # Natural gap to prevent Instagram Shadowban
+                    # ✅ SUCCESS: Save to Supabase so we NEVER post this again
+                    mark_as_posted(n["link"])
+                    
+                    logger.info(f"🔥 RVCJ Post Successful: {rvcj_data['headline']}")
+                    
+                    # 🧹 CLEANUP: Delete the local file to keep Render fast
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+
+                    # 🕒 NATURAL GAP: Wait 20 minutes before the next post
+                    # This is the "Hardcore" way to avoid getting banned by Meta.
+                    logger.info("🕒 Waiting 20 minutes to maintain human-like behavior...")
                     time.sleep(1200) 
                 else:
-                    logger.error(f"IG Post Error: {ig_res}")
+                    logger.error(f"❌ Meta API rejected the post: {ig_res}")
 
             except Exception as e:
-                logger.error(f"Item process error: {e}")
+                logger.error(f"⚠️ Failed to process specific news item: {e}")
                 continue
+                
+    except Exception as e:
+        logger.error(f"🛑 Critical Engine Crash: {e}")
     finally:
+        # Unlock the engine so it can run again in the next 5-minute cycle
         IS_POSTING_BUSY = False
 
 # ======================================================
@@ -441,3 +524,12 @@ def cron_trigger():
 @app.get("/login", response_class=HTMLResponse)
 def login():
     return "<h2 style='padding:20px'>Login (Coming Soon)</h2><a href='/'>Back</a>"
+
+@app.get("/test-supabase")
+def test_supabase():
+    try:
+        # Try to fetch one row from your table
+        res = supabase.table("posted_news").select("*").limit(1).execute()
+        return {"status": "Connected!", "data_found": len(res.data)}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}    
