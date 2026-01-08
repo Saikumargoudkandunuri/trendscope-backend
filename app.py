@@ -376,13 +376,28 @@ app = FastAPI(lifespan=lifespan)
 # ======================================================
 
 @app.get("/", response_class=HTMLResponse)
-def home(category: str = Query(None)):
-    news = fetch_news()
-    news.sort(key=lambda x: x["trend"], reverse=True)
-    if category:
-        news = [n for n in news if n["category"] == category]
+def home(category: str = Query(None), request: requests.Request = None):
+    # --- 🚨 SPEED FIX FOR CRON JOBS 🚨 ---
+    # If the visitor is a bot (Cron-job or UptimeRobot), give them a tiny page 
+    # so the server responds in 0.1 seconds.
+    user_agent = ""
+    if request and "user-agent" in request.headers:
+        user_agent = request.headers["user-agent"].lower()
+    
+    if "cron" in user_agent or "uptime" in user_agent:
+        return "<html><body>TrendScope Engine is Awake</body></html>"
 
-    flash = news[:5]
+    # --- REGULAR VISITOR LOGIC ---
+    # Only do the heavy news fetching if a real human is visiting the site
+    try:
+        news = fetch_news(filter_posted=False)
+        news.sort(key=lambda x: x["trend"], reverse=True)
+        if category:
+            news = [n for n in news if n["category"] == category]
+        flash = news[:5]
+    except Exception as e:
+        logger.error(f"Home Page Error: {e}")
+        return "<html><body><h1>Site under heavy load. Please refresh.</h1></body></html>"
 
     return f"""
 <html>
