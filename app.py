@@ -14,6 +14,7 @@ import uuid
 import requests
 import feedparser
 import pytz
+import openai
 from datetime import datetime
 from contextlib import asynccontextmanager
 
@@ -44,6 +45,10 @@ cloudinary.config(
 # Gemini AI Setup (2026 SDK)
 api_key_val = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key_val)
+
+# --- UPDATE YOUR CONFIGURATION ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # Instagram Setup
 IG_BUSINESS_ID = os.getenv("IG_BUSINESS_ID")
@@ -102,7 +107,17 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    prompt = f"Convert to Hinglish RVCJ Style: {text}"
+    prompt = f"""
+    Act as an RVCJ Instagram Creator. Convert this news into Hinglish.
+    Return ONLY a JSON object:
+    {{
+      "headline": "Short viral Hinglish headline (MAX 10 words)",
+      "description": "Engaging Hinglish story (MAX 30 words, start with 'Dosto...')"
+    }}
+    News: {text}
+    """
+
+    # --- BRAIN 1: GOOGLE GEMINI (Primary) ---
     try:
         res = client.models.generate_content(
             model="gemini-2.0-flash", 
@@ -111,13 +126,40 @@ def ai_rvcj_converter(text):
         )
         return json.loads(res.text)
     except Exception as e:
-        # 🚨 This is the fix: catch the 429 and return a default message
-        logger.warning(f"AI was busy or errored: {e}")
-        return {
-            "headline": "🚨 BIG BREAKING NEWS", 
-            "description": "Dosto, badi khabar aa rahi hai. Details ke liye jude rahein! 🔥"
-        }
+        logger.warning(f"Gemini failed, switching to Groq... Error: {e}")
 
+    # --- BRAIN 2: GROQ (Backup 1 - Llama 3) ---
+    if GROQ_API_KEY:
+        try:
+            groq_client = openai.OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+            res = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={ "type": "json_object" }
+            )
+            return json.loads(res.choices[0].message.content)
+        except Exception as e:
+            logger.warning(f"Groq failed, switching to OpenRouter... Error: {e}")
+
+    # --- BRAIN 3: OPENROUTER (Backup 2 - Free Models) ---
+    if OPENROUTER_API_KEY:
+        try:
+            or_client = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+            res = or_client.chat.completions.create(
+                model="meta-llama/llama-3.2-3b-instruct:free",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            # Find the JSON block in the text
+            json_text = re.search(r'\{.*\}', res.choices[0].message.content, re.DOTALL).group()
+            return json.loads(json_text)
+        except Exception as e:
+            logger.error(f"All AI brains failed! Error: {e}")
+
+    # --- EMERGENCY FALLBACK (No AI needed) ---
+    return {
+        "headline": "🚨 BIG BREAKING NEWS",
+        "description": f"Dosto, badi khabar aa rahi hai. Details ke liye swipe karein! {text[:50]}..."
+    }
 # Aliases to prevent website crashes
 def ai_short_news(text):
     return ai_rvcj_converter(text)['headline']
