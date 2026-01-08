@@ -375,30 +375,25 @@ app = FastAPI(lifespan=lifespan)
 # 9. WEBSITE HTML PAGES (The Original 600-line UI)
 # ======================================================
 
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request, category: str = Query(None)): # Change requests.Request to Request
-    # --- 🚨 SPEED FIX FOR BOTS 🚨 ---
+@app.get("/", response_class=HTMLResponse, methods=["GET", "HEAD"])
+def home(request: Request, category: str = Query(None)):
+    # 1. Catch Robots (UptimeRobot/Cron-job)
     user_agent = request.headers.get("user-agent", "").lower()
     
-    # If the visitor is a bot (Cron-job or UptimeRobot), give them a tiny page 
-    if "cron" in user_agent or "uptime" in user_agent:
-        return "<html><body>TrendScope Engine is Awake</body></html>"
+    # If it's a HEAD request or a robot, return immediately to save time
+    if request.method == "HEAD" or "uptime" in user_agent or "cron" in user_agent:
+        return Response(content="TrendScope Awake", media_type="text/plain")
 
-    # --- REGULAR VISITOR LOGIC ---
+    # 2. Regular Visitor Logic (Humans)
     try:
-        # Pass filter_posted=False so the website always shows news
-        news = fetch_news(filter_posted=False) 
+        news = fetch_news(filter_posted=False)
         news.sort(key=lambda x: x["trend"], reverse=True)
-        
         if category:
             news = [n for n in news if n["category"] == category]
-        
         flash = news[:5]
     except Exception as e:
         logger.error(f"Home Page Error: {e}")
-        return "<html><body><h1>Site Busy. Please refresh.</h1></body></html>"
-
-    # ... (the rest of your return f""" HTML code stays the same)
+        return HTMLResponse(content="<h1>Site Busy. Please refresh.</h1>", status_code=503)
 
     return f"""
 <html>
