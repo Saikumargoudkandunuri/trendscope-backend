@@ -109,7 +109,7 @@ def mark_as_posted(url):
 def is_quiet_hours():
     """Logic to stop posting between 1 AM and 6 AM IST"""
     now = datetime.now(pytz.timezone('Asia/Kolkata'))
-    return 1 <= now.hour < 6
+    return false
 
 def upload_image_to_cloudinary(local_path):
     try:
@@ -278,6 +278,23 @@ def post_to_instagram(image_url, caption):
 
     logger.info(f"PUBLISH RESPONSE: {publish_res}")
     return publish_res
+def is_already_posted(url):
+    """Check Supabase to see if we already posted this story"""
+    try:
+        # Look for the URL in the 'posted_news' table
+        res = supabase.table("posted_news").select("url").eq("url", url).execute()
+        return len(res.data) > 0
+    except Exception as e:
+        logger.error(f"Supabase Check Error: {e}")
+        return False
+
+def mark_as_posted(url):
+    """Save the URL to Supabase forever so we don't repeat it"""
+    try:
+        supabase.table("posted_news").insert({"url": url}).execute()
+        logger.info(f"✅ URL locked in Supabase Vault")
+    except Exception as e:
+        logger.error(f"Supabase Save Error: {e}")
 
 def post_category_wise_news():
     global IS_POSTING_BUSY
