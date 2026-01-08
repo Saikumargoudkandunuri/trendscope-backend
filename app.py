@@ -109,7 +109,7 @@ def mark_as_posted(url):
 def is_quiet_hours():
     """Logic to stop posting between 1 AM and 6 AM IST"""
     now = datetime.now(pytz.timezone('Asia/Kolkata'))
-    return false
+    return False
 
 def upload_image_to_cloudinary(local_path):
     try:
