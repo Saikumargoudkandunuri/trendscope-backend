@@ -102,29 +102,20 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Converts boring news into viral Hinglish RVCJ Style"""
-    prompt = f"""
-    Act as an RVCJ Instagram Content Creator. 
-    Convert this news into Hinglish (Mixed Hindi and English).
-    Return ONLY a JSON object:
-    {{
-      "headline": "Viral Hinglish headline (MAX 10 words, e.g. 'Bhaari Nuksan!')",
-      "description": "Engaging Hinglish story (MAX 30 words, start with 'Dosto...')"
-    }}
-    News: {text}
-    """
+    prompt = f"Convert to Hinglish RVCJ Style: {text}"
     try:
-        response = client.models.generate_content(
+        res = client.models.generate_content(
             model="gemini-2.0-flash", 
             contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
-        return json.loads(response.text)
+        return json.loads(res.text)
     except Exception as e:
-        logger.error(f"AI Error: {e}")
+        # 🚨 This is the fix: catch the 429 and return a default message
+        logger.warning(f"AI was busy or errored: {e}")
         return {
-            "headline": "🚨 BIG BREAKING NEWS!", 
-            "description": f"Dosto, badi khabar aa rahi hai: {text[:50]}... Stay tuned! 🔥"
+            "headline": "🚨 BIG BREAKING NEWS", 
+            "description": "Dosto, badi khabar aa rahi hai. Details ke liye jude rahein! 🔥"
         }
 
 # Aliases to prevent website crashes
@@ -205,7 +196,7 @@ def post_category_wise_news():
         return
 
     try:
-        IS_POSTING_BUSY = True
+        IS_POSTING_BUSY = false
         logger.info("🚜 RVCJ Engine Waking Up...")
         news_items = fetch_news()
         posted_ids = load_posted()
@@ -397,8 +388,13 @@ def admin_page():
 
 @app.get("/cron/hourly")
 def cron_trigger():
+    # We check if it's already busy. If yes, we just say "Busy" but return 200 OK.
+    if IS_POSTING_BUSY:
+        return {"status": "already_running_skipping_trigger"}
+    
+    # Trigger in a separate thread so the web request finishes instantly
     threading.Thread(target=post_category_wise_news).start()
-    return {"status": "success"}
+    return {"status": "trigger_received_successfully"}
 
 @app.get("/login", response_class=HTMLResponse)
 def login():
