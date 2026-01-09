@@ -149,32 +149,33 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """The Wirally Logic: One single block of info that explains the whole news"""
+    """Wirally Style: Explains the news in 3-4 lines for the image"""
     prompt = f"""
-    Act as a news editor for Wirally. Summarize this news into 3 or 4 powerful lines.
-    - These lines must explain the WHOLE news so the user doesn't need to read anything else.
-    - Use simple, high-impact English.
-    - Do not use bullet points, just give the text.
+    Act as a news editor for Wirally. Summarize this news so a user understands EVERYTHING by reading just 3-4 lines.
     
-    Return ONLY a JSON object:
-    {{
-      "image_info": "THE FULL NEWS SUMMARY HERE",
-      "short_caption": "A 1-line Hinglish hook for the Instagram caption"
-    }}
+    Return ONLY a JSON object with these exact keys:
+    1. "headline": A short viral Hinglish hook (MAX 8 words).
+    2. "image_info": 3 or 4 short lines explaining the whole news facts.
+    3. "short_caption": A 1-line Hinglish hook for the Instagram caption.
     
     News: {text}
     """
     try:
         res = client.models.generate_content(
-            model="gemini-2.0-flash", contents=prompt,
+            model="gemini-2.0-flash", 
+            contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
         return json.loads(res.text)
-    except:
+    except Exception as e:
+        logger.error(f"AI Brain Error: {e}")
+        # Emergency Fallback - matching the keys exactly
         return {
-            "image_info": f"BREAKING: {text[:100]}",
+            "headline": "🚨 BIG BREAKING NEWS",
+            "image_info": f"Update: {text[:80]}... Details inside.",
             "short_caption": "Badi khabar! Details ke liye image dekhein."
         }
+
 # Aliases to prevent website crashes
 def ai_short_news(text):
     return ai_rvcj_converter(text)['headline']
@@ -278,51 +279,54 @@ def post_to_instagram(image_url, caption):
 def post_category_wise_news():
     global IS_POSTING_BUSY
     if IS_POSTING_BUSY or is_quiet_hours():
-        logger.info("Engine Paused: Busy or Quiet Hours")
         return
 
     try:
         IS_POSTING_BUSY = True
-        logger.info("🚜 RVCJ Engine Waking Up...")
+        logger.info("🚜 RVCJ Engine Started...")
         news_items = fetch_news(filter_posted=True)
         
         for n in news_items:
             try:
-                # 1. AI Analysis (Wirally Style)
+                # 1. Get Data from AI
                 data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
-                # 2. Unique Filename
-                unique_name = f"post_{uuid.uuid4().hex}.png"
+                # 2. Unique Filename (To stop repeating images)
+                img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3. Build Image (Using image_info for the text)
-                # Combine headline and info for the image
+                # 3. Combine Headline and Info for the Image
+                # This sends the text to the Wirally Teal Bar
                 full_text_for_image = f"{data['headline']}\n\n{data['image_info']}"
                 
+                # 4. Generate Image
+                # Ensure your image_generator.py accepts 'full_info_text'
                 path = generate_news_image(
                     full_info_text=full_text_for_image, 
                     image_url=n["image"], 
-                    output_name=unique_name
+                    output_name=img_name
                 )
 
-                # 4. Upload & Post
-                url = upload_image_to_cloudinary(path)
-                
-                # We add hashtags to the short Hinglish caption
-                final_caption = f"{data['short_caption']}\n.\n.\n#IndiaNews #Trending #WirallyStyle"
-                
-                ig_res = post_to_instagram(url, final_caption)
+                # 5. Upload to Cloudinary
+                public_url = upload_image_to_cloudinary(path)
+                if not public_url: continue
+
+                # 6. Post to Instagram
+                # Use short_caption for the post body
+                cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
+                ig_res = post_to_instagram(cache_buster_url, data['short_caption'])
 
                 if "id" in ig_res:
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Success: {data['headline']}")
                     if os.path.exists(path): os.remove(path)
                     
-                    # Wait 20 mins between posts
+                    # 20 min gap to avoid spam filters
                     time.sleep(1200) 
                 else:
                     logger.error(f"IG Error: {ig_res}")
 
             except Exception as e:
+                # This is where your 'headline' error was showing up
                 logger.error(f"Item error: {e}")
                 continue
     finally:
