@@ -149,30 +149,29 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Wirally Style: Explains the news in 3-4 lines for the image"""
+    """Wirally Style: Explains the news in 3-4 lines for the image using 2.0-Flash-Lite"""
     prompt = f"""
     Act as a news editor for Wirally. Summarize this news so a user understands EVERYTHING by reading just 3-4 lines.
-    
     Return ONLY a JSON object with these exact keys:
-    1. "headline": A short viral Hinglish hook (MAX 8 words).
-    2. "image_info": 3 or 4 short lines explaining the whole news facts.
+    1. "headline": A shocking viral Hinglish hook (MAX 8 words).
+    2. "image_info": 3 or 4 short lines explaining the whole news facts clearly.
     3. "short_caption": A 1-line Hinglish hook for the Instagram caption.
-    
     News: {text}
     """
+    
+    # We use 2.0-flash-lite as your logs showed it is available
     try:
         res = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash-lite", 
             contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
         return json.loads(res.text)
     except Exception as e:
-        logger.error(f"AI Brain Error: {e}")
-        # Emergency Fallback - matching the keys exactly
+        logger.error(f"AI error: {e}")
         return {
             "headline": "🚨 BIG BREAKING NEWS",
-            "image_info": f"Update: {text[:80]}... Details inside.",
+            "image_info": f"Breaking Update: {text[:80]}... Details inside.",
             "short_caption": "Badi khabar! Details ke liye image dekhein."
         }
 
@@ -240,9 +239,13 @@ def fetch_news(filter_posted=False):
 def post_to_instagram(image_url, caption):
     # FIX: Add a Cache Buster to the image URL
     # This prevents Instagram from showing a previous post's image
-    cache_buster = f"{image_url}?v={random.randint(10000, 99999)}"
-    
-    logger.info(f"Uploading to Meta with Cache Buster: {cache_buster}")
+    # Change this:
+# cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
+# ig_res = post_to_instagram(cache_buster_url, data['short_caption'])
+
+# To this:
+# Just pass the public_url. The post_to_instagram function will add the buster once.
+    ig_res = post_to_instagram(public_url, data['short_caption'])
 
     # STEP 1: Create media container
     create_res = requests.post(

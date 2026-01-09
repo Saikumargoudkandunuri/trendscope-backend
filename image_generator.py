@@ -17,72 +17,57 @@ def get_font(size):
     except:
         return ImageFont.load_default()
 
-def generate_news_image(full_info_text, image_url, output_name):
-    # 1. Create Base
-    img = Image.new("RGB", (W, H), (0, 0, 0))
+# Change the function definition line to match the app.py call exactly
+def generate_news_image(headline, info_text, image_url, output_name):
+    # 1. Create Base Canvas (Dark Mode)
+    img = Image.new("RGB", (1080, 1080), (15, 17, 26))
+    draw = ImageDraw.Draw(img)
     
-    # 2. Background Image (Full Screen Center Crop)
+    # 2. Main Photo Handling (Top 60%)
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(image_url, headers=headers, timeout=10)
-        photo = Image.open(BytesIO(r.content)).convert("RGB")
-        
-        # Center Crop logic
-        img_aspect = photo.width / photo.height
-        if img_aspect > 1:
-            new_width = int(photo.height)
-            left = (photo.width - new_width) / 2
-            photo = photo.crop((left, 0, left + new_width, photo.height))
-        else:
-            new_height = int(photo.width)
-            top = (photo.height - new_height) / 2
-            photo = photo.crop((0, top, photo.width, top + new_height))
-        
-        photo = photo.resize((1080, 1080), Image.Resampling.LANCZOS)
+        photo = Image.open(BytesIO(r.content)).convert("RGB").resize((1080, 620), Image.Resampling.LANCZOS)
         img.paste(photo, (0, 0))
     except:
-        pass
+        draw.rectangle([0, 0, 1080, 620], fill=(30, 35, 50))
 
-    # 3. Wirally Teal Bar (Translucent)
-    overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    # 3. Wirally Style Translucent Bar
+    overlay = Image.new('RGBA', (1080, 1080), (0, 0, 0, 0))
     draw_ov = ImageDraw.Draw(overlay)
-    # The dark teal bar at the bottom
-    bar_height = 380 
-    draw_ov.rectangle([0, H - bar_height, W, H], fill=(13, 56, 74, 240)) 
+    bar_h = 430 
+    draw_ov.rectangle([0, 1080 - bar_h, 1080, 1080], fill=(13, 56, 74, 245)) 
     img.paste(overlay, (0, 0), overlay)
     
-    # 4. Draw the Full News Info (All Caps, Bold)
-    draw = ImageDraw.Draw(img)
-    text = full_info_text.upper() # Wirally always uses UpperCase
-    
-    def draw_wirally_text(text, start_y, max_h, initial_size):
+    # 4. Drawing Text Logic
+    def draw_text_auto(text, y, max_h, initial_size, is_bold):
         size = initial_size
-        while size > 24:
-            font = get_font(size)
+        while size > 20:
+            font = get_font(size, is_bold)
             lines, current_line = [], []
             for word in text.split():
                 test_line = ' '.join(current_line + [word])
-                if draw.textbbox((0, 0), test_line, font=font)[2] <= 1000:
+                if draw.textbbox((0, 0), test_line, font=font)[2] <= 980:
                     current_line.append(word)
                 else:
                     lines.append(' '.join(current_line))
                     current_line = [word]
             lines.append(' '.join(current_line))
-            
-            if len(lines) * (size + 15) <= max_h:
-                y = start_y
+            if len(lines) * (size + 12) <= max_h:
                 for line in lines:
-                    # White text like reference
-                    draw.text((40, y), line, fill=(255, 255, 255), font=font)
-                    y += (size + 15)
+                    draw.text((50, y), line, fill=(255, 255, 255), font=font)
+                    y += (size + 12)
                 return y
-            size -= 2
-        return start_y
+            size -= 3
+        return y
 
-    # Draw the main info inside the teal bar
-    draw_wirally_text(text, H - 340, 300, 52)
+    # Draw the big Headline
+    curr_y = draw_text_auto(headline.upper(), 1080 - 400, 140, 68, True)
+    # Draw the 3-4 lines of info
+    draw_text_auto(info_text.upper(), curr_y + 10, 240, 34, True)
 
-    # 5. Save
+    # 5. Branding & Save
+    draw.text((50, 1030), "FOLLOW @TRENDSCOPE | INDIA", fill=(0, 210, 255), font=get_font(24, True))
     save_path = os.path.join(OUTPUT_DIR, output_name)
     img.save(save_path)
     return save_path
