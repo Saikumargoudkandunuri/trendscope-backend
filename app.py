@@ -149,31 +149,32 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Analyzes news: Catchy Hinglish Hook + 3-4 Fact Lines + Long English Story"""
+    """The Wirally Logic: One single block of info that explains the whole news"""
     prompt = f"""
-    Act as a professional viral news journalist. Analyze the following news and convert it into this exact JSON format:
+    Act as a news editor for Wirally. Summarize this news into 3 or 4 powerful lines.
+    - These lines must explain the WHOLE news so the user doesn't need to read anything else.
+    - Use simple, high-impact English.
+    - Do not use bullet points, just give the text.
     
-    1. "headline": A shocking/catchy viral Hinglish headline for the image (MAX 8 words).
-    2. "info_points": Exactly 3 or 4 short, clear English bullet points summarizing the WHOLE news so a user understands everything just by reading these (MAX 10 words per bullet).
-    3. "long_story": A detailed, 3-paragraph professional English explanation of the news for the Instagram description.
-
+    Return ONLY a JSON object:
+    {{
+      "image_info": "THE FULL NEWS SUMMARY HERE",
+      "short_caption": "A 1-line Hinglish hook for the Instagram caption"
+    }}
+    
     News: {text}
     """
     try:
         res = client.models.generate_content(
-            model="gemini-2.0-flash", 
-            contents=prompt,
+            model="gemini-2.0-flash", contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
         return json.loads(res.text)
-    except Exception as e:
-        logger.error(f"AI Analysis Error: {e}")
+    except:
         return {
-            "headline": "🚨 BIG BREAKING NEWS",
-            "info_points": ["Major update just received", "Full details are being analyzed", "Check description for the story"],
-            "long_story": f"Detailed report on current events: {text[:300]}..."
+            "image_info": f"BREAKING: {text[:100]}",
+            "short_caption": "Badi khabar! Details ke liye image dekhein."
         }
-
 # Aliases to prevent website crashes
 def ai_short_news(text):
     return ai_rvcj_converter(text)['headline']
@@ -277,44 +278,47 @@ def post_to_instagram(image_url, caption):
 def post_category_wise_news():
     global IS_POSTING_BUSY
     if IS_POSTING_BUSY or is_quiet_hours():
+        logger.info("Engine Paused: Busy or Quiet Hours")
         return
 
     try:
         IS_POSTING_BUSY = True
-        logger.info("🚜 RVCJ Engine Starting...")
+        logger.info("🚜 RVCJ Engine Waking Up...")
         news_items = fetch_news(filter_posted=True)
         
         for n in news_items:
             try:
-                # 1. AI Analysis (Hinglish Hook + English Points + Long Story)
+                # 1. AI Analysis (Wirally Style)
                 data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
                 # 2. Unique Filename
-                unique_filename = f"rvcj_{uuid.uuid4().hex}.png"
+                unique_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3. Generate Image (🚨 PASSING info_points NOW)
-                image_path = generate_news_image(
-                    headline=data['headline'],
-                    info_points=data['info_points'], # Make sure image_generator.py accepts this!
-                    image_url=n["image"],
-                    output_name=unique_filename
+                # 3. Build Image (Using image_info for the text)
+                # Combine headline and info for the image
+                full_text_for_image = f"{data['headline']}\n\n{data['image_info']}"
+                
+                path = generate_news_image(
+                    full_info_text=full_text_for_image, 
+                    image_url=n["image"], 
+                    output_name=unique_name
                 )
 
-                # 4. Upload to Cloudinary
-                public_url = upload_image_to_cloudinary(image_path)
-                if not public_url: continue
-
-                # 5. Post to Instagram (Using the Long Story + Cache Buster)
-                cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
-                final_caption = f"{data['long_story']}\n.\n.\n#IndiaNews #Trending #TrendScope"
+                # 4. Upload & Post
+                url = upload_image_to_cloudinary(path)
                 
-                ig_res = post_to_instagram(cache_buster_url, final_caption)
+                # We add hashtags to the short Hinglish caption
+                final_caption = f"{data['short_caption']}\n.\n.\n#IndiaNews #Trending #WirallyStyle"
+                
+                ig_res = post_to_instagram(url, final_caption)
 
                 if "id" in ig_res:
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Success: {data['headline']}")
-                    if os.path.exists(image_path): os.remove(image_path)
-                    time.sleep(1200) # 20 min gap
+                    if os.path.exists(path): os.remove(path)
+                    
+                    # Wait 20 mins between posts
+                    time.sleep(1200) 
                 else:
                     logger.error(f"IG Error: {ig_res}")
 
@@ -425,42 +429,27 @@ function toggleMenu(){{
 </body>
 </html>
 """
-
 @app.get("/news/{i}", response_class=HTMLResponse)
 def news_detail(i: int):
-    news_list = fetch_news()
+    news_list = fetch_news(filter_posted=False) # Website shows everything
     item = next((n for n in news_list if n["id"] == i), None)
     if not item: return "<h3>News not found</h3>"
 
+    # Use the same AI converter
     rvcj = ai_rvcj_converter(item["summary"])
 
     return f"""
     <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            body {{ margin:0; font-family: Arial; background:#0d47a1; color:white; }}
-            .container {{ padding:16px; }}
-            .card {{ background:white; color:black; padding:16px; border-radius:14px; }}
-            img {{ width:100%; border-radius:12px; margin-bottom:12px; }}
-            .title {{ font-size:20px; font-weight:bold; margin-bottom:10px; color:#1a237e; }}
-            .label {{ font-weight:bold; margin-top:14px; color:#555; font-size:12px; }}
-            .box {{ background:#f1f3f6; padding:10px; border-radius:8px; margin-top:6px; line-height:1.5; border-left:4px solid #0d47a1; }}
-            .btn {{ width:100%; padding:12px; margin-top:12px; border:none; border-radius:10px; font-size:16px; font-weight:bold; cursor:pointer; }}
-            .read {{ background:#ff9800; color:white; }}
-            .share {{ background:#1e88e5; color:white; }}
-        </style>
-    </head>
+    ... (keep your style section) ...
     <body>
         <div class="container">
-            <a href="/" style="color:white; text-decoration:none; font-weight:bold;">⬅ Back</a>
-            <div class="card" style="margin-top:15px">
+            <a href="/">⬅ Back</a>
+            <div class="card">
                 <img src="{item['image']}">
-                <div class="title">{rvcj['headline']}</div>
-                <div class="label">📸 RVCJ STORY (HINGLISH)</div>
-                <div class="box">{rvcj['description']}</div>
-                <button class="btn share" onclick="navigator.share({{title:'{rvcj['headline']}', url:'{item['link']}'}})">🔗 Share News</button>
-                <button class="btn read" onclick="window.open('{item['link']}', '_blank')">Read Full Article</button>
+                <h2>{rvcj['headline']}</h2>
+                <div class="label">📰 NEWS HIGHLIGHTS</div>
+                <div class="box">{rvcj['image_info'].replace('\\n', '<br>')}</div>
+                <button class="btn read" onclick="window.open('{item['link']}', '_blank')">Read Source Article</button>
             </div>
         </div>
     </body>
