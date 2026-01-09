@@ -149,7 +149,7 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Wirally Style: Explains the news in 3-4 lines for the image using 2.0-Flash-Lite"""
+    """Wirally Engine: Using 1.5-Flash for higher quota and stability"""
     prompt = f"""
     Act as a news editor for Wirally. Summarize this news so a user understands EVERYTHING by reading just 3-4 lines.
     Return ONLY a JSON object with these exact keys:
@@ -159,21 +159,29 @@ def ai_rvcj_converter(text):
     News: {text}
     """
     
-    # We use 2.0-flash-lite as your logs showed it is available
-    try:
-        res = client.models.generate_content(
-            model="gemini-2.0-flash-lite", 
-            contents=prompt,
-            config={'response_mime_type': 'application/json'}
-        )
-        return json.loads(res.text)
-    except Exception as e:
-        logger.error(f"AI error: {e}")
-        return {
-            "headline": "🚨 BIG BREAKING NEWS",
-            "image_info": f"Breaking Update: {text[:80]}... Details inside.",
-            "short_caption": "Badi khabar! Details ke liye image dekhein."
-        }
+    # This loop tries 3 times if Google says 'Busy'
+    for attempt in range(3):
+        try:
+            res = client.models.generate_content(
+                model="gemini-1.5-flash", # Use 1.5 for better free tier limits
+                contents=prompt,
+                config={'response_mime_type': 'application/json'}
+            )
+            return json.loads(res.text)
+        except Exception as e:
+            if "429" in str(e):
+                logger.warning(f"Quota hit, waiting 30s... (Attempt {attempt+1})")
+                time.sleep(30)
+                continue
+            logger.error(f"AI Brain Error: {e}")
+            break
+            
+    # Emergency fallback if AI fails
+    return {
+        "headline": "🚨 BREAKING NEWS UPDATE",
+        "image_info": f"Update: {text[:80]}... Details inside.",
+        "short_caption": "Badi khabar! Details ke liye image dekhein."
+    }
 
 # Aliases to prevent website crashes
 def ai_short_news(text):
@@ -300,10 +308,10 @@ def post_category_wise_news():
 
                 # 3. Build Image (Passes Headline and the 3-4 Lines)
                 path = generate_news_image(
-                    headline=data['headline'], 
-                    info_text=data['image_info'], 
-                    image_url=n["image"], 
-                    output_name=img_name
+                headline=data['headline'], 
+                info_text=data['image_info'], 
+                image_url=n["image"], 
+                output_name=img_name
                 )
 
                 # 4. Upload to Cloudinary

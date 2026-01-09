@@ -11,10 +11,13 @@ FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 W, H = 1080, 1080 
 
-def get_font(size):
+def get_font(size, bold=False):
+    """Helper to load font or fallback to default. Now accepts 'bold' argument."""
+    path = FONT_BOLD_PATH if bold else FONT_PATH
     try:
-        return ImageFont.truetype(FONT_BOLD_PATH, size)
+        return ImageFont.truetype(path, size)
     except:
+        # If font file is missing, return default
         return ImageFont.load_default()
 
 # Change the function definition line to match the app.py call exactly
