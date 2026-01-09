@@ -162,7 +162,7 @@ def ai_rvcj_converter(text):
     """
     try:
         res = client.models.generate_content(
-            model="gemini-2.0-flash", 
+            model="gemini-1.5-flash",
             contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
@@ -284,49 +284,46 @@ def post_category_wise_news():
     try:
         IS_POSTING_BUSY = True
         logger.info("🚜 RVCJ Engine Started...")
+        # Fetch news that hasn't been posted yet (Supabase Check)
         news_items = fetch_news(filter_posted=True)
         
         for n in news_items:
             try:
-                # 1. Get Data from AI
+                # 1. AI Analysis
                 data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
-                # 2. Unique Filename (To stop repeating images)
+                # 2. Unique Filename (UUID)
                 img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3. Combine Headline and Info for the Image
-                # This sends the text to the Wirally Teal Bar
-                full_text_for_image = f"{data['headline']}\n\n{data['image_info']}"
-                
-                # 4. Generate Image
-                # Ensure your image_generator.py accepts 'full_info_text'
+                # 3. Build Image (Passes Headline and the 3-4 Lines)
                 path = generate_news_image(
-                    full_info_text=full_text_for_image, 
+                    headline=data['headline'], 
+                    info_text=data['image_info'], 
                     image_url=n["image"], 
                     output_name=img_name
                 )
 
-                # 5. Upload to Cloudinary
+                # 4. Upload to Cloudinary
                 public_url = upload_image_to_cloudinary(path)
                 if not public_url: continue
 
-                # 6. Post to Instagram
-                # Use short_caption for the post body
-                cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
-                ig_res = post_to_instagram(cache_buster_url, data['short_caption'])
+                # 5. Post to Instagram
+                # We use the short_caption as the body. 
+                # post_to_instagram function handles the cache buster ?v=
+                ig_res = post_to_instagram(public_url, data['short_caption'])
 
                 if "id" in ig_res:
+                    # Save to Supabase forever
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Success: {data['headline']}")
                     if os.path.exists(path): os.remove(path)
                     
-                    # 20 min gap to avoid spam filters
+                    # 20 min gap between posts
                     time.sleep(1200) 
                 else:
-                    logger.error(f"IG Error: {ig_res}")
+                    logger.error(f"IG API Error: {ig_res}")
 
             except Exception as e:
-                # This is where your 'headline' error was showing up
                 logger.error(f"Item error: {e}")
                 continue
     finally:
