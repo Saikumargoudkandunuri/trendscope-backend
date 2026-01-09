@@ -149,17 +149,16 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
+    """Analyzes news: Catchy Hinglish Hook + 3-4 Fact Lines + Long English Story"""
     prompt = f"""
-    Act as an RVCJ Instagram Creator. Convert this news into Hinglish.
-    Return ONLY a JSON object:
-    {{
-      "headline": "Short viral Hinglish headline (MAX 10 words)",
-      "description": "Engaging Hinglish story (MAX 30 words, start with 'Dosto...')"
-    }}
+    Act as a professional viral news journalist. Analyze the following news and convert it into this exact JSON format:
+    
+    1. "headline": A shocking/catchy viral Hinglish headline for the image (MAX 8 words).
+    2. "info_points": Exactly 3 or 4 short, clear English bullet points summarizing the WHOLE news so a user understands everything just by reading these (MAX 10 words per bullet).
+    3. "long_story": A detailed, 3-paragraph professional English explanation of the news for the Instagram description.
+
     News: {text}
     """
-
-    # --- BRAIN 1: GOOGLE GEMINI (Primary) ---
     try:
         res = client.models.generate_content(
             model="gemini-2.0-flash", 
@@ -168,40 +167,13 @@ def ai_rvcj_converter(text):
         )
         return json.loads(res.text)
     except Exception as e:
-        logger.warning(f"Gemini failed, switching to Groq... Error: {e}")
+        logger.error(f"AI Analysis Error: {e}")
+        return {
+            "headline": "🚨 BIG BREAKING NEWS",
+            "info_points": ["Major update just received", "Full details are being analyzed", "Check description for the story"],
+            "long_story": f"Detailed report on current events: {text[:300]}..."
+        }
 
-    # --- BRAIN 2: GROQ (Backup 1 - Llama 3) ---
-    if GROQ_API_KEY:
-        try:
-            groq_client = openai.OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
-            res = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={ "type": "json_object" }
-            )
-            return json.loads(res.choices[0].message.content)
-        except Exception as e:
-            logger.warning(f"Groq failed, switching to OpenRouter... Error: {e}")
-
-    # --- BRAIN 3: OPENROUTER (Backup 2 - Free Models) ---
-    if OPENROUTER_API_KEY:
-        try:
-            or_client = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
-            res = or_client.chat.completions.create(
-                model="meta-llama/llama-3.2-3b-instruct:free",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            # Find the JSON block in the text
-            json_text = re.search(r'\{.*\}', res.choices[0].message.content, re.DOTALL).group()
-            return json.loads(json_text)
-        except Exception as e:
-            logger.error(f"All AI brains failed! Error: {e}")
-
-    # --- EMERGENCY FALLBACK (No AI needed) ---
-    return {
-        "headline": "🚨 BIG BREAKING NEWS",
-        "description": f"Dosto, badi khabar aa rahi hai. Details ke liye swipe karein! {text[:50]}..."
-    }
 # Aliases to prevent website crashes
 def ai_short_news(text):
     return ai_rvcj_converter(text)['headline']
@@ -309,37 +281,40 @@ def post_category_wise_news():
 
     try:
         IS_POSTING_BUSY = True
-        logger.info("🚜 RVCJ Engine Started...")
-        
-        # 🚨 FIX: Fetch ONLY news that hasn't been posted yet
+        logger.info("🚜 RVCJ Engine Starting...")
         news_items = fetch_news(filter_posted=True)
         
         for n in news_items:
             try:
-                # 🚨 FIX: Corrected function name from ai_rvcj_style to ai_rvcj_converter
+                # 1. AI Analysis (Hinglish Hook + English Points + Long Story)
                 data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
+                # 2. Unique Filename
                 unique_filename = f"rvcj_{uuid.uuid4().hex}.png"
+
+                # 3. Generate Image (🚨 PASSING info_points NOW)
                 image_path = generate_news_image(
                     headline=data['headline'],
+                    info_points=data['info_points'], # Make sure image_generator.py accepts this!
                     image_url=n["image"],
                     output_name=unique_filename
                 )
 
+                # 4. Upload to Cloudinary
                 public_url = upload_image_to_cloudinary(image_path)
                 if not public_url: continue
 
-                # Post to Instagram
+                # 5. Post to Instagram (Using the Long Story + Cache Buster)
                 cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
-                ig_res = post_to_instagram(cache_buster_url, data['description'])
+                final_caption = f"{data['long_story']}\n.\n.\n#IndiaNews #Trending #TrendScope"
+                
+                ig_res = post_to_instagram(cache_buster_url, final_caption)
 
                 if "id" in ig_res:
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Success: {data['headline']}")
                     if os.path.exists(image_path): os.remove(image_path)
-                    
-                    # Wait 20 mins between posts
-                    time.sleep(1200) 
+                    time.sleep(1200) # 20 min gap
                 else:
                     logger.error(f"IG Error: {ig_res}")
 
