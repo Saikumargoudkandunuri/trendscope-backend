@@ -149,7 +149,7 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Wirally Engine: Using 1.5-Flash for higher quota and stability"""
+    """Wirally Engine: Using 2.0-Flash-Lite for production stability"""
     prompt = f"""
     Act as a news editor for Wirally. Summarize this news so a user understands EVERYTHING by reading just 3-4 lines.
     Return ONLY a JSON object with these exact keys:
@@ -159,11 +159,11 @@ def ai_rvcj_converter(text):
     News: {text}
     """
     
-    # This loop tries 3 times if Google says 'Busy'
     for attempt in range(3):
         try:
+            # Forcing gemini-2.0-flash-lite which worked in your test
             res = client.models.generate_content(
-                model="gemini-1.5-flash", # Use 1.5 for better free tier limits
+                model="gemini-2.0-flash-lite", 
                 contents=prompt,
                 config={'response_mime_type': 'application/json'}
             )
@@ -176,9 +176,8 @@ def ai_rvcj_converter(text):
             logger.error(f"AI Brain Error: {e}")
             break
             
-    # Emergency fallback if AI fails
     return {
-        "headline": "🚨 BREAKING NEWS UPDATE",
+        "headline": "🚨 BIG UPDATE",
         "image_info": f"Update: {text[:80]}... Details inside.",
         "short_caption": "Badi khabar! Details ke liye image dekhein."
     }
@@ -295,41 +294,44 @@ def post_category_wise_news():
     try:
         IS_POSTING_BUSY = True
         logger.info("🚜 RVCJ Engine Started...")
-        # Fetch news that hasn't been posted yet (Supabase Check)
         news_items = fetch_news(filter_posted=True)
         
         for n in news_items:
             try:
-                # 1. AI Analysis
+                # 1. Get Data
                 data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
-                # 2. Unique Filename (UUID)
+                # 2. Unique Filename
                 img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3. Build Image (Passes Headline and the 3-4 Lines)
+                # 3. Build Image
+                # Combine headline and info for the image bar
+                full_text_for_image = f"{data['headline']}\n\n{data['image_info']}"
+                
                 path = generate_news_image(
-                headline=data['headline'], 
-                info_text=data['image_info'], 
-                image_url=n["image"], 
-                output_name=img_name
+                    headline=data['headline'], 
+                    info_text=data['image_info'], 
+                    image_url=n["image"], 
+                    output_name=img_name
                 )
 
                 # 4. Upload to Cloudinary
+                # 🚨 FIXED: We name the variable 'public_url' so the next line finds it
                 public_url = upload_image_to_cloudinary(path)
-                if not public_url: continue
+                
+                if not public_url:
+                    continue
 
                 # 5. Post to Instagram
-                # We use the short_caption as the body. 
-                # post_to_instagram function handles the cache buster ?v=
+                # Post to instagram handles the cache buster ?v= internally
                 ig_res = post_to_instagram(public_url, data['short_caption'])
 
                 if "id" in ig_res:
-                    # Save to Supabase forever
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Success: {data['headline']}")
                     if os.path.exists(path): os.remove(path)
                     
-                    # 20 min gap between posts
+                    # 20 min gap
                     time.sleep(1200) 
                 else:
                     logger.error(f"IG API Error: {ig_res}")
@@ -339,7 +341,7 @@ def post_category_wise_news():
                 continue
     finally:
         IS_POSTING_BUSY = False
-
+        
 # ======================================================
 # 8. BACKGROUND WORKER & LIFESPAN
 # ======================================================
