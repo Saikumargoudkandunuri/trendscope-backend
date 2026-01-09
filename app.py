@@ -149,36 +149,58 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Wirally Engine: Using 2.0-Flash-Lite for production stability"""
+    """Wirally Engine: Tries Gemini -> Groq -> OpenRouter to avoid Quota errors"""
     prompt = f"""
     Act as a news editor for Wirally. Summarize this news so a user understands EVERYTHING by reading just 3-4 lines.
-    Return ONLY a JSON object with these exact keys:
-    1. "headline": A shocking viral Hinglish hook (MAX 8 words).
-    2. "image_info": 3 or 4 short lines explaining the whole news facts clearly.
-    3. "short_caption": A 1-line Hinglish hook for the Instagram caption.
+    Return ONLY a JSON object with:
+    "headline": "Shocking viral Hinglish hook (MAX 8 words)",
+    "image_info": "3 or 4 short lines of facts",
+    "short_caption": "1-line Hinglish hook"
     News: {text}
     """
-    
-    for attempt in range(3):
+
+    # --- BRAIN 1: GEMINI (Primary) ---
+    try:
+        res = client.models.generate_content(
+            model="gemini-2.0-flash-lite", 
+            contents=prompt,
+            config={'response_mime_type': 'application/json'}
+        )
+        return json.loads(res.text)
+    except Exception as e:
+        logger.warning(f"Gemini Busy, switching to Groq...")
+
+    # --- BRAIN 2: GROQ (Backup - Llama 3) ---
+    if GROQ_API_KEY:
         try:
-            # Forcing gemini-2.0-flash-lite which worked in your test
-            res = client.models.generate_content(
-                model="gemini-2.0-flash-lite", 
-                contents=prompt,
-                config={'response_mime_type': 'application/json'}
+            groq = openai.OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+            res = groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={ "type": "json_object" }
             )
-            return json.loads(res.text)
-        except Exception as e:
-            if "429" in str(e):
-                logger.warning(f"Quota hit, waiting 30s... (Attempt {attempt+1})")
-                time.sleep(30)
-                continue
-            logger.error(f"AI Brain Error: {e}")
-            break
-            
+            return json.loads(res.choices[0].message.content)
+        except:
+            logger.warning(f"Groq Busy, switching to OpenRouter...")
+
+    # --- BRAIN 3: OPENROUTER (Backup - Free Models) ---
+    if OPENROUTER_API_KEY:
+        try:
+            router = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
+            res = router.chat.completions.create(
+                model="google/gemini-2.0-flash-lite:free", # Using Gemini via OpenRouter
+                messages=[{"role": "user", "content": prompt}]
+            )
+            # Find the JSON block
+            json_text = re.search(r'\{.*\}', res.choices[0].message.content, re.DOTALL).group()
+            return json.loads(json_text)
+        except:
+            logger.error(f"All AI brains failed!")
+
+    # --- EMERGENCY FALLBACK ---
     return {
-        "headline": "🚨 BIG UPDATE",
-        "image_info": f"Update: {text[:80]}... Details inside.",
+        "headline": "🚨 BIG UPDATE JUST IN",
+        "image_info": f"Update: {text[:80]}...",
         "short_caption": "Badi khabar! Details ke liye image dekhein."
     }
 
@@ -341,7 +363,7 @@ def post_category_wise_news():
                 continue
     finally:
         IS_POSTING_BUSY = False
-        
+
 # ======================================================
 # 8. BACKGROUND WORKER & LIFESPAN
 # ======================================================
