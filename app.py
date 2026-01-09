@@ -22,7 +22,7 @@ import cloudinary
 import cloudinary.uploader
 from google import genai
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Request, Response # Add 'Request' here
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -375,16 +375,18 @@ app = FastAPI(lifespan=lifespan)
 # 9. WEBSITE HTML PAGES (The Original 600-line UI)
 # ======================================================
 
-@app.get("/", response_class=HTMLResponse, methods=["GET", "HEAD"])
+# Change this line:
+@app.api_route("/", response_class=HTMLResponse, methods=["GET", "HEAD"])
 def home(request: Request, category: str = Query(None)):
-    # 1. Catch Robots (UptimeRobot/Cron-job)
+    # --- 1. Catch Robots (UptimeRobot/Cron-job) ---
     user_agent = request.headers.get("user-agent", "").lower()
     
     # If it's a HEAD request or a robot, return immediately to save time
     if request.method == "HEAD" or "uptime" in user_agent or "cron" in user_agent:
+        # Use Response (Import it from fastapi if not already there)
         return Response(content="TrendScope Awake", media_type="text/plain")
 
-    # 2. Regular Visitor Logic (Humans)
+    # --- 2. Regular Visitor Logic ---
     try:
         news = fetch_news(filter_posted=False)
         news.sort(key=lambda x: x["trend"], reverse=True)
@@ -394,6 +396,8 @@ def home(request: Request, category: str = Query(None)):
     except Exception as e:
         logger.error(f"Home Page Error: {e}")
         return HTMLResponse(content="<h1>Site Busy. Please refresh.</h1>", status_code=503)
+
+    # ... rest of your original HTML return f""" ...
 
     return f"""
 <html>
