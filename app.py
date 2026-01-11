@@ -582,7 +582,7 @@ def post_to_instagram(image_url: str, caption: str):
         return create_res
 
     # ---------- STEP 2: WAIT ----------
-    time.sleep(20)
+    time.sleep(70 * 60)
 
     # ---------- STEP 3: PUBLISH ----------
     publish_res = requests.post(
@@ -674,7 +674,7 @@ def post_category_wise_news():
 
                     # ✅ IMPORTANT: 30 min gap AFTER successful post
                     logger.info("⏳ Sleeping 30 minutes before next post...")
-                    time.sleep(30 * 60)   # ✅ 30 minutes
+                    time.sleep(70 * 60)   # ✅ 1hour10 minutes
                     break
 
                 else:
@@ -771,7 +771,7 @@ def run_background_worker():
 
             time.sleep(300)
         except:
-            time.sleep(30 * 60)
+            time.sleep(70 * 60)
 
 
 
@@ -779,7 +779,7 @@ def run_background_worker():
 
 # ✅ 30 minutes gap between any social posts (Telegram/Twitter)
 SOCIAL_LAST_POST_AT = 0
-SOCIAL_POST_GAP_SECONDS = 30 * 60   # ✅ 30 minutes
+SOCIAL_POST_GAP_SECONDS = 70 * 60   # ✅ 30 minutes
 
 
 @asynccontextmanager
