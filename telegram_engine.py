@@ -7,7 +7,7 @@ from telethon.tl.functions.contacts import ResolveUsernameRequest
 
 TELEGRAM_CHANNELS = [
     "cricinformer",
-    "cricketracker",
+    "crictracker",
     "cricketgully",
     "RadarXCricket",
     "Ipl_Live_Score_IPL",
