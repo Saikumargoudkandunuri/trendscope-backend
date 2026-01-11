@@ -22,6 +22,8 @@ def get_font(size, bold=False):
 
 # Change the function definition line to match the app.py call exactly
 def generate_news_image(headline, info_text, image_url, output_name):
+    # ... inside the code, make sure get_font is called like this:
+    font = get_font(size, is_bold)
     # 1. Create Base Canvas (Dark Mode)
     img = Image.new("RGB", (1080, 1080), (15, 17, 26))
     draw = ImageDraw.Draw(img)

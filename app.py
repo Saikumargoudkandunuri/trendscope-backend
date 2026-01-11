@@ -320,16 +320,14 @@ def post_category_wise_news():
         
         for n in news_items:
             try:
-                # 1. Get Data
+                # 1. Get Data from AI (Gemini/Groq/OpenRouter)
                 data = ai_rvcj_converter(n.get("summary", n["title"]))
                 
                 # 2. Unique Filename
                 img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3. Build Image
-                # Combine headline and info for the image bar
-                full_text_for_image = f"{data['headline']}\n\n{data['image_info']}"
-                
+                # 3. Create Image
+                # Pass 'headline' and 'image_info' separately for the Wirally Teal Bar
                 path = generate_news_image(
                     headline=data['headline'], 
                     info_text=data['image_info'], 
@@ -338,22 +336,23 @@ def post_category_wise_news():
                 )
 
                 # 4. Upload to Cloudinary
-                # 🚨 FIXED: We name the variable 'public_url' so the next line finds it
+                # 🚨 FIXED: Named the variable 'public_url' to match the next line
                 public_url = upload_image_to_cloudinary(path)
                 
                 if not public_url:
                     continue
 
                 # 5. Post to Instagram
-                # Post to instagram handles the cache buster ?v= internally
+                # We use the 'short_caption' for the Instagram body
                 ig_res = post_to_instagram(public_url, data['short_caption'])
 
                 if "id" in ig_res:
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Success: {data['headline']}")
-                    if os.path.exists(path): os.remove(path)
+                    if os.path.exists(path):
+                        os.remove(path)
                     
-                    # 20 min gap
+                    # 20-minute gap to avoid spam filters
                     time.sleep(1200) 
                 else:
                     logger.error(f"IG API Error: {ig_res}")
