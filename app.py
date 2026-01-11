@@ -26,6 +26,12 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
+import asyncio
+from contextlib import asynccontextmanager
+from telegram_engine import telegram_fetch_loop
+from twitter_sources import TWITTER_RSS_SOURCES
+
+
 
 # Local Application Import for your design logic
 from image_generator import generate_news_image
@@ -435,6 +441,76 @@ def fetch_news(filter_posted=False):
                 i += 1
         except: continue
     return out
+def fetch_cricket_news(filter_posted=True):
+    """
+    Fetch cricket items from CRICKET_RSS_SOURCES
+    and return structured items like normal news.
+    """
+    out = []
+    i = 100000  # big id so it doesn't conflict with normal news ids
+
+    posted_ids = load_posted() if filter_posted else set()
+
+    for src, url in CRICKET_RSS_SOURCES.items():
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries[:10]:
+                link = getattr(e, "link", "") or ""
+                if filter_posted and link in posted_ids:
+                    continue
+
+                title = getattr(e, "title", "Cricket Update")
+                summary = e.get("summary", title)
+
+                out.append({
+                    "id": i,
+                    "source": src,
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "image": "https://images.unsplash.com/photo-1504711434969-e33886168f5c",
+                    "category": "Cricket",
+                    "trend": 99
+                })
+                i += 1
+        except Exception as ex:
+            logger.error(f"Cricket RSS Error: {src} -> {ex}")
+
+    return out
+def fetch_twitter_cricket(filter_posted=True):
+    out = []
+    posted = load_posted() if filter_posted else set()
+    i = 500000
+
+    for url in TWITTER_RSS_SOURCES:
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries[:10]:
+                link = getattr(e, "link", "")
+                if filter_posted and link in posted:
+                    continue
+
+                title = e.title
+                summary = e.get("summary", title)
+
+                # filter only cricket/india
+                if not any(k in title.lower() for k in ["india", "wicket", "six", "four", "ipl", "wpl"]):
+                    continue
+
+                out.append({
+                    "id": i,
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "image": "https://images.unsplash.com/photo-1504711434969-e33886168f5c",
+                    "category": "Cricket",
+                    "trend": 98
+                })
+                i += 1
+        except Exception as e:
+            logger.error(f"Twitter RSS error: {e}")
+
+    return out
 
 # ======================================================
 # 7. INSTAGRAM & AUTO-POST CORE
@@ -612,6 +688,65 @@ def post_category_wise_news():
 
     finally:
         IS_POSTING_BUSY = False
+def post_cricket_news():
+    global IS_POSTING_BUSY
+
+    if IS_POSTING_BUSY:
+        logger.info("Posting already running. Skipping cricket cycle...")
+        return
+
+    try:
+        IS_POSTING_BUSY = True
+        logger.info("🏏 Cricket Engine Started...")
+     
+        twitter_items = fetch_twitter_cricket(filter_posted=True)
+        cricket_items.extend(twitter_items)
+
+
+        for n in cricket_items:
+            try:
+                # 1) AI convert
+                data = ai_rvcj_converter(n.get("summary", n.get("title", "")))
+
+                # 2) Unique image name
+                img_name = f"cricket_{uuid.uuid4().hex}.png"
+
+                # 3) Generate image
+                path = generate_news_image(
+                    headline=data.get("headline", "CRICKET UPDATE"),
+                    info_text=data.get("image_info", n.get("title", "")),
+                    image_url=n.get("image"),
+                    output_name=img_name
+                )
+
+                # 4) Upload to Cloudinary
+                public_url = upload_image_to_cloudinary(path)
+                if not public_url:
+                    logger.error("Cloudinary upload failed for cricket item.")
+                    continue
+
+                # 5) Post to IG
+                caption = data.get("short_caption") or data.get("headline") or "🏏🔥"
+                ig_res = post_to_instagram(public_url, caption)
+
+                # 6) Save posted
+                if ig_res and "id" in ig_res:
+                    mark_as_posted(n["link"])
+                    logger.info(f"✅ Cricket Posted: {n.get('title')}")
+                else:
+                    logger.error(f"❌ IG failed cricket: {ig_res}")
+
+                time.sleep(90)
+
+            except Exception as item_err:
+                logger.error(f"Cricket item error: {item_err}")
+                continue
+
+    except Exception as e:
+        logger.error(f"post_cricket_news error: {e}")
+
+    finally:
+        IS_POSTING_BUSY = False
 
 
 # ======================================================
@@ -621,19 +756,56 @@ def post_category_wise_news():
 def run_background_worker():
     while True:
         try:
-            # Check for news every 5 minutes (300 seconds)
+            # Normal news cycle
             post_category_wise_news()
-            time.sleep(300) 
-        except: time.sleep(30 * 60)
+
+            # Cricket cycle
+            post_cricket_news()
+
+            time.sleep(300)
+        except:
+            time.sleep(30 * 60)
+
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure Render doesn't crash if folder is missing
+    # ✅ Ensure output folder exists
     os.makedirs(os.path.join("images", "output"), exist_ok=True)
-    # Start the engine thread
+
+    # ✅ Start RSS engine background thread
     threading.Thread(target=run_background_worker, daemon=True).start()
+
+    # ✅ Function runs whenever Telegram message comes
+    async def on_telegram_event(text, source):
+        logger.info(f"✅ TG EVENT: {text[:80]}...")
+
+        # 1) Convert into viral format
+        data = ai_rvcj_converter(text)
+
+        # 2) Create image
+        img_name = f"tg_{uuid.uuid4().hex}.png"
+        path = generate_news_image(
+            headline=data.get("headline", "CRICKET UPDATE"),
+            info_text=data.get("image_info", text[:120]),
+            image_url="https://images.unsplash.com/photo-1504711434969-e33886168f5c",
+            output_name=img_name
+        )
+
+        # 3) Upload and post
+        public_url = upload_image_to_cloudinary(path)
+        if public_url:
+            caption = data.get("short_caption") or data.get("headline") or "🔥"
+            post_to_instagram(public_url, caption)
+
+    # ✅ Start Telegram engine as another background thread
+    def tg_runner():
+        asyncio.run(telegram_fetch_loop(on_telegram_event, logger))
+
+    threading.Thread(target=tg_runner, daemon=True).start()
+
     yield
+
 
 app = FastAPI(lifespan=lifespan)
 

@@ -9,3 +9,4 @@ cloudinary
 pillow
 openai
 supabase
+telethon==1.36.0
