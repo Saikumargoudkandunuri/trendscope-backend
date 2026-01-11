@@ -1,5 +1,16 @@
 import time
 from app import post_category_wise_news
+from cricket_engine import cricket_worker_loop
+import threading
+
+# Start Cricket Engine
+t2 = threading.Thread(
+    target=cricket_worker_loop,
+    args=(generate_news_image, upload_image_to_cloudinary, post_to_instagram, logger),
+    daemon=True
+)
+t2.start()
+
 
 print("🚀 TrendScope Background Worker started")
 
