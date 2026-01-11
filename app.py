@@ -159,13 +159,7 @@ def ai_rvcj_converter(text):
       "image_info": "...",
       "short_caption": "..."
     }
-
-    FIXED:
-    - safe env key loading
-    - safe parsing for choices missing
-    - handles non-json AI output
     """
-
     import os
     import re
     import json
@@ -190,9 +184,6 @@ def ai_rvcj_converter(text):
 
     # ---- Helper: normalize AI output into your final format ----
     def normalize_ai_json(raw):
-        """
-        Converts model response (raw string) into valid dict output.
-        """
         try:
             raw = (raw or "").strip()
 
@@ -207,7 +198,6 @@ def ai_rvcj_converter(text):
             image_info = (data.get("image_info") or "").strip()
             short_caption = (data.get("short_caption") or "").strip()
 
-            # enforce minimal fallbacks
             if not headline:
                 headline = "BREAKING UPDATE"
             if not image_info:
@@ -222,7 +212,6 @@ def ai_rvcj_converter(text):
             }
 
         except Exception:
-            # fallback if output isn't JSON
             fallback_headline = "BREAKING UPDATE"
             if text:
                 fallback_headline = text[:50].upper()
@@ -233,7 +222,6 @@ def ai_rvcj_converter(text):
                 "short_caption": "Trending update 🔥"
             }
 
-    # ---- If empty text ----
     if not text:
         return {
             "headline": "BREAKING UPDATE",
@@ -241,12 +229,10 @@ def ai_rvcj_converter(text):
             "short_caption": "Breaking update 🔥"
         }
 
-    # ---- Keys from environment (SAFE) ----
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
-    # ---- Prompt ----
     prompt = f"""
 Act as a viral news editor for Wirally / RVCJ style.
 
@@ -261,64 +247,91 @@ News text:
 {text}
 """.strip()
 
-    # =========================
-    # 1) GEMINI (PRIMARY)
-    # =========================
+    # 1) GEMINI
     try:
         if GOOGLE_API_KEY:
             from google import genai
-
             client = genai.Client(api_key=GOOGLE_API_KEY)
             res = client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=prompt
             )
-
             raw = getattr(res, "text", "") or ""
-            out = normalize_ai_json(raw)
-            return out
+            return normalize_ai_json(raw)
     except Exception as e:
         logger.warning(f"Gemini Busy, switching to Groq... ({e})")
 
-    # =========================
-    # 2) GROQ (SECONDARY)
-    # =========================
+    # 2) GROQ
     try:
         if GROQ_API_KEY:
             headers = {
                 "Authorization": f"Bearer {GROQ_API_KEY}",
                 "Content-Type": "application/json"
             }
-
             body = {
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.6
             }
-
             r = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers=headers,
                 json=body,
                 timeout=30
             )
-
             resp = r.json() if r.content else {}
 
-            # handle api errors
             if r.status_code != 200 or "error" in resp:
                 raise Exception(f"Groq API Error: status={r.status_code}, resp={resp}")
 
             raw = safe_openai_style_content(resp)
-
             if not raw:
                 raise Exception(f"Groq response missing content: {resp}")
 
-            out = normalize_ai_json(raw)
-            return out
+            return normalize_ai_json(raw)
 
     except Exception as e:
         logger.warning(f"Groq Busy, switching to OpenRouter... ({e})")
+
+    # 3) OPENROUTER
+    try:
+        if OPENROUTER_API_KEY:
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": os.getenv("APP_PUBLIC_URL", "https://trendscope-backend-fnsu.onrender.com"),
+                "X-Title": "Trendscope Wirally Engine"
+            }
+            body = {
+                "model": "openai/gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.6
+            }
+            r = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=30
+            )
+            resp = r.json() if r.content else {}
+
+            if r.status_code != 200 or "error" in resp:
+                raise Exception(f"OpenRouter API Error: status={r.status_code}, resp={resp}")
+
+            raw = safe_openai_style_content(resp)
+            if not raw:
+                raise Exception(f"OpenRouter response missing content: {resp}")
+
+            return normalize_ai_json(raw)
+
+    except Exception as e:
+        logger.error(f"All AI brains failed! ({e})")
+
+    return {
+        "headline": "BREAKING UPDATE",
+        "image_info": text[:160].replace("\n", " "),
+        "short_caption": "Breaking update 🔥"
+    }
 
     # =========================
     # 3) OPENROUTER (LAST RESORT)
@@ -426,21 +439,16 @@ def fetch_news(filter_posted=False):
 # ======================================================
 # 7. INSTAGRAM & AUTO-POST CORE
 # ======================================================
-def post_to_instagram(image_url, caption):
-    from post_limiter import can_post_now, mark_posted_now
+# ======================================================
+# 7. INSTAGRAM & AUTO-POST CORE
+# ======================================================
 
-if not can_post_now():
-    logger.warning("⏳ Global post limiter: skipping this post")
-    return {"error": "rate_limit_global"}
-
-# after successful publish:
-mark_posted_now()
-
+def post_to_instagram(image_url: str, caption: str):
     """
-    FIX:
-    - Adds cooldown for rate limit / action blocked
-    - Prevents retry spam
-    - Adds cache buster
+    Safe Instagram posting with:
+    - global rate limiter
+    - IG action-block cooldown
+    - cache buster
     """
 
     import time
@@ -448,6 +456,12 @@ mark_posted_now()
     import json
     import os
     import requests
+    from post_limiter import can_post_now, mark_posted_now
+
+    # ---------- GLOBAL RATE LIMIT ----------
+    if not can_post_now():
+        logger.warning("⏳ Global post limiter: skipping this post")
+        return {"error": "rate_limit_global"}
 
     COOLDOWN_FILE = "ig_cooldown.json"
 
@@ -455,37 +469,36 @@ mark_posted_now()
         if not os.path.exists(COOLDOWN_FILE):
             return {"blocked_until": 0}
         try:
-            with open(COOLDOWN_FILE, "r", encoding="utf-8") as f:
+            with open(COOLDOWN_FILE, "r") as f:
                 return json.load(f)
         except:
             return {"blocked_until": 0}
 
     def save_cooldown(data):
         try:
-            with open(COOLDOWN_FILE, "w", encoding="utf-8") as f:
+            with open(COOLDOWN_FILE, "w") as f:
                 json.dump(data, f)
         except:
             pass
 
-    # ----------------- COOLDOWN CHECK -----------------
+    # ---------- COOLDOWN CHECK ----------
     cd = load_cooldown()
     now = int(time.time())
-    blocked_until = int(cd.get("blocked_until", 0))
 
-    if now < blocked_until:
-        mins = int((blocked_until - now) / 60)
-        logger.warning(f"⏳ IG cooldown active. Skip posting for {mins} more minutes.")
-        return {"error": "cooldown_active", "blocked_until": blocked_until}
+    if now < int(cd.get("blocked_until", 0)):
+        mins = (cd["blocked_until"] - now) // 60
+        logger.warning(f"⏳ IG cooldown active. {mins} min remaining.")
+        return {"error": "cooldown_active", "blocked_until": cd["blocked_until"]}
 
-    # ----------------- Cache Buster -----------------
-    cache_buster = f"{image_url}?v={random.randint(100000, 999999)}"
+    # ---------- CACHE BUSTER ----------
+    image_url = f"{image_url}?v={random.randint(100000,999999)}"
 
-    # STEP 1: Create media container
+    # ---------- STEP 1: CREATE MEDIA ----------
     try:
         create_res = requests.post(
             f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
             data={
-                "image_url": cache_buster,
+                "image_url": image_url,
                 "caption": caption,
                 "access_token": PAGE_ACCESS_TOKEN
             },
@@ -495,55 +508,48 @@ mark_posted_now()
         logger.error(f"IG CREATE EXCEPTION: {e}")
         return {"error": str(e)}
 
-    # Handle errors
     if "error" in create_res:
         logger.error(f"IG CREATE ERROR: {create_res}")
 
-        # If Action Blocked / Rate Limited → cooldown
-        err = create_res.get("error", {})
+        err = create_res["error"]
         if err.get("code") == 4 or err.get("error_subcode") == 2207051:
-            # wait 60 minutes
-            cd["blocked_until"] = int(time.time()) + 60 * 60
+            cd["blocked_until"] = now + 3600
             save_cooldown(cd)
-            logger.error("🚫 IG blocked. Cooling down for 60 minutes.")
+            logger.error("🚫 IG action blocked. Cooling down 60 mins.")
+
         return create_res
 
-    if "id" not in create_res:
-        logger.error(f"IG CREATE ERROR (no id): {create_res}")
+    creation_id = create_res.get("id")
+    if not creation_id:
         return create_res
 
-    creation_id = create_res["id"]
-
-    # STEP 2: Wait for processing
+    # ---------- STEP 2: WAIT ----------
     time.sleep(20)
 
-    # STEP 3: Publish media
-    try:
-        publish_res = requests.post(
-            f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
-            data={
-                "creation_id": creation_id,
-                "access_token": PAGE_ACCESS_TOKEN
-            },
-            timeout=30
-        ).json()
-    except Exception as e:
-        logger.error(f"IG PUBLISH EXCEPTION: {e}")
-        return {"error": str(e)}
+    # ---------- STEP 3: PUBLISH ----------
+    publish_res = requests.post(
+        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
+        data={
+            "creation_id": creation_id,
+            "access_token": PAGE_ACCESS_TOKEN
+        },
+        timeout=30
+    ).json()
 
     logger.info(f"PUBLISH RESPONSE: {publish_res}")
 
-    # Handle publish errors
     if "error" in publish_res:
-        logger.error(f"❌ IG failed: {publish_res}")
-
-        err = publish_res.get("error", {})
+        err = publish_res["error"]
         if err.get("code") == 4 or err.get("error_subcode") == 2207051:
-            # wait 60 minutes
-            cd["blocked_until"] = int(time.time()) + 60 * 60
+            cd["blocked_until"] = int(time.time()) + 3600
             save_cooldown(cd)
-            logger.error("🚫 IG blocked. Cooling down for 60 minutes.")
+            logger.error("🚫 IG blocked after publish. Cooling down.")
+
         return publish_res
+
+    # ---------- SUCCESS ----------
+    mark_posted_now()
+    return publish_res
 
     return publish_res
 
