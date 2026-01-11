@@ -86,6 +86,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
 # ======================================================
 # SUPABASE BRIDGE FUNCTIONS (FIXES NAMEERROR)
 # ======================================================
@@ -150,38 +151,52 @@ def upload_image_to_cloudinary(local_path):
 
 def ai_rvcj_converter(text):
     """
-    Wirally Engine: Tries Gemini -> Groq -> OpenRouter.
-    FIXES:
-    - Always returns valid dict keys headline/image_info/short_caption
-    - Strong error handling so engine never crashes
+    Wirally Engine: Gemini -> Groq -> OpenRouter fallback
+
+    RETURNS ALWAYS:
+    {
+      "headline": "...",
+      "image_info": "...",
+      "short_caption": "..."
+    }
+
+    FIXED:
+    - safe env key loading
+    - safe parsing for choices missing
+    - handles non-json AI output
     """
 
+    import os
+    import re
+    import json
+    import requests
+
     text = (text or "").strip()
-    if not text:
-        return {
-            "headline": "BREAKING UPDATE",
-            "image_info": "Latest news update\nMore details soon",
-            "short_caption": "Breaking update 🔥"
-        }
 
-    prompt = f"""
-Act as a viral news editor for Wirally.
+    # ---- Helper: safe extractor for Groq/OpenRouter responses ----
+    def safe_openai_style_content(resp_json):
+        try:
+            if not isinstance(resp_json, dict):
+                return None
+            choices = resp_json.get("choices", [])
+            if not choices:
+                return None
+            msg = choices[0].get("message", {})
+            if not msg:
+                return None
+            return msg.get("content")
+        except Exception:
+            return None
 
-Return ONLY a JSON object with:
-"headline": "Shocking viral Hinglish hook (MAX 8 words)",
-"image_info": "3 or 4 short lines of facts (each line short)",
-"short_caption": "1-line Hinglish hook for Instagram"
-
-News:
-{text}
-"""
-
+    # ---- Helper: normalize AI output into your final format ----
     def normalize_ai_json(raw):
         """
-        Takes raw model response and converts into safe output dict.
+        Converts model response (raw string) into valid dict output.
         """
         try:
-            # extract json object if model adds extra text
+            raw = (raw or "").strip()
+
+            # Extract JSON if AI adds extra text
             match = re.search(r"\{.*\}", raw, re.S)
             if match:
                 raw = match.group(0)
@@ -192,11 +207,11 @@ News:
             image_info = (data.get("image_info") or "").strip()
             short_caption = (data.get("short_caption") or "").strip()
 
-            # minimal fallback enforcement
+            # enforce minimal fallbacks
             if not headline:
-                headline = "VIRAL BREAKING NEWS"
+                headline = "BREAKING UPDATE"
             if not image_info:
-                image_info = "Full details coming soon\nStay tuned for updates"
+                image_info = "More details soon\nStay tuned"
             if not short_caption:
                 short_caption = headline + " 🔥"
 
@@ -207,77 +222,156 @@ News:
             }
 
         except Exception:
-            # fallback if AI output not json
+            # fallback if output isn't JSON
+            fallback_headline = "BREAKING UPDATE"
+            if text:
+                fallback_headline = text[:50].upper()
+
             return {
-                "headline": "VIRAL BREAKING NEWS",
-                "image_info": text[:140].replace("\n", " "),
-                "short_caption": "Breaking update 🔥"
+                "headline": fallback_headline,
+                "image_info": (text[:160] if text else "More details soon").replace("\n", " "),
+                "short_caption": "Trending update 🔥"
             }
 
-    # ----------------- GEMINI (PRIMARY) -----------------
+    # ---- If empty text ----
+    if not text:
+        return {
+            "headline": "BREAKING UPDATE",
+            "image_info": "More details soon\nStay tuned",
+            "short_caption": "Breaking update 🔥"
+        }
+
+    # ---- Keys from environment (SAFE) ----
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    # ---- Prompt ----
+    prompt = f"""
+Act as a viral news editor for Wirally / RVCJ style.
+
+Return ONLY a JSON object with EXACT keys:
+{{
+  "headline": "Shocking viral Hinglish hook (MAX 8 words)",
+  "image_info": "3 or 4 short lines of facts (each line short)",
+  "short_caption": "1-line Hinglish/Telugu hook for Instagram"
+}}
+
+News text:
+{text}
+""".strip()
+
+    # =========================
+    # 1) GEMINI (PRIMARY)
+    # =========================
     try:
         if GOOGLE_API_KEY:
-            model = genai.Client(api_key=GOOGLE_API_KEY)
-            res = model.models.generate_content(
+            from google import genai
+
+            client = genai.Client(api_key=GOOGLE_API_KEY)
+            res = client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=prompt
             )
-            raw = res.text or ""
-            return normalize_ai_json(raw)
+
+            raw = getattr(res, "text", "") or ""
+            out = normalize_ai_json(raw)
+            return out
     except Exception as e:
         logger.warning(f"Gemini Busy, switching to Groq... ({e})")
 
-    # ----------------- GROQ (SECONDARY) -----------------
+    # =========================
+    # 2) GROQ (SECONDARY)
+    # =========================
     try:
         if GROQ_API_KEY:
-            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+
             body = {
                 "model": "llama-3.1-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.6
             }
 
-            r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=30)
-            raw = r.json()["choices"][0]["message"]["content"]
-            return normalize_ai_json(raw)
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=30
+            )
+
+            resp = r.json() if r.content else {}
+
+            # handle api errors
+            if r.status_code != 200 or "error" in resp:
+                raise Exception(f"Groq API Error: status={r.status_code}, resp={resp}")
+
+            raw = safe_openai_style_content(resp)
+
+            if not raw:
+                raise Exception(f"Groq response missing content: {resp}")
+
+            out = normalize_ai_json(raw)
+            return out
+
     except Exception as e:
         logger.warning(f"Groq Busy, switching to OpenRouter... ({e})")
 
-    # ---------------- OPENROUTER (LAST RESORT) ----------------
+    # =========================
+    # 3) OPENROUTER (LAST RESORT)
+    # =========================
     try:
         if OPENROUTER_API_KEY:
-            headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+
+                # Recommended by OpenRouter
+                "HTTP-Referer": os.getenv("APP_PUBLIC_URL", "https://trendscope-backend-fnsu.onrender.com"),
+                "X-Title": "Trendscope Wirally Engine"
+            }
+
             body = {
                 "model": "openai/gpt-4o-mini",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.6
             }
 
-            r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=30)
-            raw = r.json()["choices"][0]["message"]["content"]
-            return normalize_ai_json(raw)
+            r = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=30
+            )
+
+            resp = r.json() if r.content else {}
+
+            if r.status_code != 200 or "error" in resp:
+                raise Exception(f"OpenRouter API Error: status={r.status_code}, resp={resp}")
+
+            raw = safe_openai_style_content(resp)
+
+            if not raw:
+                raise Exception(f"OpenRouter response missing content: {resp}")
+
+            out = normalize_ai_json(raw)
+            return out
+
     except Exception as e:
         logger.error(f"All AI brains failed! ({e})")
 
-    # absolute final fallback
+    # =========================
+    # FINAL FALLBACK
+    # =========================
     return {
         "headline": "BREAKING UPDATE",
         "image_info": text[:160].replace("\n", " "),
         "short_caption": "Breaking update 🔥"
     }
-
-
-# Aliases to prevent website crashes
-def ai_short_news(text):
-    return ai_rvcj_converter(text)['headline']
-
-def ai_caption(text):
-    """
-    FIX:
-    Previously returned ['description'] which does not exist.
-    """
-    data = ai_rvcj_converter(text)
-    return data.get("short_caption") or data.get("headline") or ""
+""
 
 # ======================================================
 # 6. NEWS ENGINE (Scoring & Fetching)
@@ -332,20 +426,49 @@ def fetch_news(filter_posted=False):
 # ======================================================
 # 7. INSTAGRAM & AUTO-POST CORE
 # ======================================================
-
 def post_to_instagram(image_url, caption):
     """
-    Upload to Instagram Graph API
-
-    FIXES:
-    - removes recursion bug
-    - safe handling of failures
+    FIX:
+    - Adds cooldown for rate limit / action blocked
+    - Prevents retry spam
+    - Adds cache buster
     """
 
     import time
     import random
+    import json
+    import os
     import requests
 
+    COOLDOWN_FILE = "ig_cooldown.json"
+
+    def load_cooldown():
+        if not os.path.exists(COOLDOWN_FILE):
+            return {"blocked_until": 0}
+        try:
+            with open(COOLDOWN_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {"blocked_until": 0}
+
+    def save_cooldown(data):
+        try:
+            with open(COOLDOWN_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except:
+            pass
+
+    # ----------------- COOLDOWN CHECK -----------------
+    cd = load_cooldown()
+    now = int(time.time())
+    blocked_until = int(cd.get("blocked_until", 0))
+
+    if now < blocked_until:
+        mins = int((blocked_until - now) / 60)
+        logger.warning(f"⏳ IG cooldown active. Skip posting for {mins} more minutes.")
+        return {"error": "cooldown_active", "blocked_until": blocked_until}
+
+    # ----------------- Cache Buster -----------------
     cache_buster = f"{image_url}?v={random.randint(100000, 999999)}"
 
     # STEP 1: Create media container
@@ -363,13 +486,26 @@ def post_to_instagram(image_url, caption):
         logger.error(f"IG CREATE EXCEPTION: {e}")
         return {"error": str(e)}
 
-    if "id" not in create_res:
+    # Handle errors
+    if "error" in create_res:
         logger.error(f"IG CREATE ERROR: {create_res}")
+
+        # If Action Blocked / Rate Limited → cooldown
+        err = create_res.get("error", {})
+        if err.get("code") == 4 or err.get("error_subcode") == 2207051:
+            # wait 60 minutes
+            cd["blocked_until"] = int(time.time()) + 60 * 60
+            save_cooldown(cd)
+            logger.error("🚫 IG blocked. Cooling down for 60 minutes.")
+        return create_res
+
+    if "id" not in create_res:
+        logger.error(f"IG CREATE ERROR (no id): {create_res}")
         return create_res
 
     creation_id = create_res["id"]
 
-    # STEP 2: Wait for meta processing
+    # STEP 2: Wait for processing
     time.sleep(20)
 
     # STEP 3: Publish media
@@ -387,6 +523,19 @@ def post_to_instagram(image_url, caption):
         return {"error": str(e)}
 
     logger.info(f"PUBLISH RESPONSE: {publish_res}")
+
+    # Handle publish errors
+    if "error" in publish_res:
+        logger.error(f"❌ IG failed: {publish_res}")
+
+        err = publish_res.get("error", {})
+        if err.get("code") == 4 or err.get("error_subcode") == 2207051:
+            # wait 60 minutes
+            cd["blocked_until"] = int(time.time()) + 60 * 60
+            save_cooldown(cd)
+            logger.error("🚫 IG blocked. Cooling down for 60 minutes.")
+        return publish_res
+
     return publish_res
 
 

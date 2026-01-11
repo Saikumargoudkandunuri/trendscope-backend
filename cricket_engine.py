@@ -6,6 +6,14 @@ import uuid
 import requests
 from datetime import datetime
 
+def get_ai_keys():
+    return {
+        "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY", "").strip(),
+        "GROQ_API_KEY": os.getenv("GROQ_API_KEY", "").strip(),
+        "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", "").strip(),
+    }
+
+
 # -----------------------------
 # CONFIG
 # -----------------------------
@@ -204,7 +212,34 @@ def detect_dropped_catch(text):
 # -----------------------------
 # AI CAPTION GENERATION (3 brains like your app.py)
 # -----------------------------
+def safe_openai_style_content(resp_json):
+    """
+    Safe extractor for OpenAI/Groq/OpenRouter chat completion responses.
+    Returns message content string or None.
+    """
+    try:
+        if not isinstance(resp_json, dict):
+            return None
+        choices = resp_json.get("choices", [])
+        if not choices:
+            return None
+        msg = choices[0].get("message", {})
+        if not msg:
+            return None
+        return msg.get("content")
+    except Exception:
+        return None
+
+
 def ai_cricket_caption(prompt, logger=None):
+    import requests
+    import json
+    import re
+
+    keys = get_ai_keys()
+    GOOGLE_API_KEY = keys["GOOGLE_API_KEY"]
+    GROQ_API_KEY = keys["GROQ_API_KEY"]
+    OPENROUTER_API_KEY = keys["OPENROUTER_API_KEY"]
     """
     Uses:
     - Gemini (google-genai)
@@ -213,9 +248,6 @@ def ai_cricket_caption(prompt, logger=None):
     Same fallback style as your app.py
     """
 
-    import requests
-    import json
-    import re
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
