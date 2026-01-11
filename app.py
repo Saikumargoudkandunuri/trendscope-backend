@@ -291,7 +291,8 @@ News text:
             }
 
             body = {
-                "model": "llama-3.1-70b-versatile",
+                "model": "llama-3.3-70b-versatile",
+",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.6
             }
@@ -427,6 +428,15 @@ def fetch_news(filter_posted=False):
 # 7. INSTAGRAM & AUTO-POST CORE
 # ======================================================
 def post_to_instagram(image_url, caption):
+    from post_limiter import can_post_now, mark_posted_now
+
+if not can_post_now():
+    logger.warning("⏳ Global post limiter: skipping this post")
+    return {"error": "rate_limit_global"}
+
+# after successful publish:
+mark_posted_now()
+
     """
     FIX:
     - Adds cooldown for rate limit / action blocked
@@ -609,7 +619,8 @@ def run_background_worker():
             # Check for news every 5 minutes (300 seconds)
             post_category_wise_news()
             time.sleep(300) 
-        except: time.sleep(60)
+        except: time.sleep(30 * 60)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -23,10 +23,10 @@ CRICAPI_KEY = os.getenv("CRICAPI_KEY", "").strip()
 CRICKET_STATE_FILE = "cricket_posted.json"
 
 # Polling interval (seconds)
-POLL_INTERVAL = 40
+POLL_INTERVAL = 60
 
 # Post periodic match updates every N minutes
-MATCH_UPDATE_MINUTES = 18
+MATCH_UPDATE_MINUTES = 20
 
 # -----------------------------
 # HELPERS: STATE SAVE/LOAD
