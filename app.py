@@ -149,67 +149,135 @@ def upload_image_to_cloudinary(local_path):
 # ======================================================
 
 def ai_rvcj_converter(text):
-    """Wirally Engine: Tries Gemini -> Groq -> OpenRouter to avoid Quota errors"""
-    prompt = f"""
-    Act as a news editor for Wirally. Summarize this news so a user understands EVERYTHING by reading just 3-4 lines.
-    Return ONLY a JSON object with:
-    "headline": "Shocking viral Hinglish hook (MAX 8 words)",
-    "image_info": "3 or 4 short lines of facts",
-    "short_caption": "1-line Hinglish hook"
-    News: {text}
+    """
+    Wirally Engine: Tries Gemini -> Groq -> OpenRouter.
+    FIXES:
+    - Always returns valid dict keys headline/image_info/short_caption
+    - Strong error handling so engine never crashes
     """
 
-    # --- BRAIN 1: GEMINI (Primary) ---
+    text = (text or "").strip()
+    if not text:
+        return {
+            "headline": "BREAKING UPDATE",
+            "image_info": "Latest news update\nMore details soon",
+            "short_caption": "Breaking update 🔥"
+        }
+
+    prompt = f"""
+Act as a viral news editor for Wirally.
+
+Return ONLY a JSON object with:
+"headline": "Shocking viral Hinglish hook (MAX 8 words)",
+"image_info": "3 or 4 short lines of facts (each line short)",
+"short_caption": "1-line Hinglish hook for Instagram"
+
+News:
+{text}
+"""
+
+    def normalize_ai_json(raw):
+        """
+        Takes raw model response and converts into safe output dict.
+        """
+        try:
+            # extract json object if model adds extra text
+            match = re.search(r"\{.*\}", raw, re.S)
+            if match:
+                raw = match.group(0)
+
+            data = json.loads(raw)
+
+            headline = (data.get("headline") or "").strip()
+            image_info = (data.get("image_info") or "").strip()
+            short_caption = (data.get("short_caption") or "").strip()
+
+            # minimal fallback enforcement
+            if not headline:
+                headline = "VIRAL BREAKING NEWS"
+            if not image_info:
+                image_info = "Full details coming soon\nStay tuned for updates"
+            if not short_caption:
+                short_caption = headline + " 🔥"
+
+            return {
+                "headline": headline,
+                "image_info": image_info,
+                "short_caption": short_caption
+            }
+
+        except Exception:
+            # fallback if AI output not json
+            return {
+                "headline": "VIRAL BREAKING NEWS",
+                "image_info": text[:140].replace("\n", " "),
+                "short_caption": "Breaking update 🔥"
+            }
+
+    # ----------------- GEMINI (PRIMARY) -----------------
     try:
-        res = client.models.generate_content(
-            model="gemini-2.0-flash-lite", 
-            contents=prompt,
-            config={'response_mime_type': 'application/json'}
-        )
-        return json.loads(res.text)
+        if GOOGLE_API_KEY:
+            model = genai.Client(api_key=GOOGLE_API_KEY)
+            res = model.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt
+            )
+            raw = res.text or ""
+            return normalize_ai_json(raw)
     except Exception as e:
-        logger.warning(f"Gemini Busy, switching to Groq...")
+        logger.warning(f"Gemini Busy, switching to Groq... ({e})")
 
-    # --- BRAIN 2: GROQ (Backup - Llama 3) ---
-    if GROQ_API_KEY:
-        try:
-            groq = openai.OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
-            res = groq.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={ "type": "json_object" }
-            )
-            return json.loads(res.choices[0].message.content)
-        except:
-            logger.warning(f"Groq Busy, switching to OpenRouter...")
+    # ----------------- GROQ (SECONDARY) -----------------
+    try:
+        if GROQ_API_KEY:
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+            body = {
+                "model": "llama-3.1-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.6
+            }
 
-    # --- BRAIN 3: OPENROUTER (Backup - Free Models) ---
-    if OPENROUTER_API_KEY:
-        try:
-            router = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
-            res = router.chat.completions.create(
-                model="google/gemini-2.0-flash-lite:free", # Using Gemini via OpenRouter
-                messages=[{"role": "user", "content": prompt}]
-            )
-            # Find the JSON block
-            json_text = re.search(r'\{.*\}', res.choices[0].message.content, re.DOTALL).group()
-            return json.loads(json_text)
-        except:
-            logger.error(f"All AI brains failed!")
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=30)
+            raw = r.json()["choices"][0]["message"]["content"]
+            return normalize_ai_json(raw)
+    except Exception as e:
+        logger.warning(f"Groq Busy, switching to OpenRouter... ({e})")
 
-    # --- EMERGENCY FALLBACK ---
+    # ---------------- OPENROUTER (LAST RESORT) ----------------
+    try:
+        if OPENROUTER_API_KEY:
+            headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+            body = {
+                "model": "openai/gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.6
+            }
+
+            r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=30)
+            raw = r.json()["choices"][0]["message"]["content"]
+            return normalize_ai_json(raw)
+    except Exception as e:
+        logger.error(f"All AI brains failed! ({e})")
+
+    # absolute final fallback
     return {
-        "headline": "🚨 BIG UPDATE JUST IN",
-        "image_info": f"Update: {text[:80]}...",
-        "short_caption": "Badi khabar! Details ke liye image dekhein."
+        "headline": "BREAKING UPDATE",
+        "image_info": text[:160].replace("\n", " "),
+        "short_caption": "Breaking update 🔥"
     }
+
 
 # Aliases to prevent website crashes
 def ai_short_news(text):
     return ai_rvcj_converter(text)['headline']
 
 def ai_caption(text):
-    return ai_rvcj_converter(text)['description']
+    """
+    FIX:
+    Previously returned ['description'] which does not exist.
+    """
+    data = ai_rvcj_converter(text)
+    return data.get("short_caption") or data.get("headline") or ""
 
 # ======================================================
 # 6. NEWS ENGINE (Scoring & Fetching)
@@ -266,102 +334,121 @@ def fetch_news(filter_posted=False):
 # ======================================================
 
 def post_to_instagram(image_url, caption):
-    # FIX: Add a Cache Buster to the image URL
-    # This prevents Instagram from showing a previous post's image
-    # Change this:
-# cache_buster_url = f"{public_url}?v={random.randint(1000, 9999)}"
-# ig_res = post_to_instagram(cache_buster_url, data['short_caption'])
+    """
+    Upload to Instagram Graph API
 
-# To this:
-# Just pass the public_url. The post_to_instagram function will add the buster once.
-    ig_res = post_to_instagram(public_url, data['short_caption'])
+    FIXES:
+    - removes recursion bug
+    - safe handling of failures
+    """
+
+    import time
+    import random
+    import requests
+
+    cache_buster = f"{image_url}?v={random.randint(100000, 999999)}"
 
     # STEP 1: Create media container
-    create_res = requests.post(
-        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
-        data={
-            "image_url": cache_buster, # Use the busted URL here
-            "caption": caption,
-            "access_token": PAGE_ACCESS_TOKEN
-        }
-    ).json()
+    try:
+        create_res = requests.post(
+            f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
+            data={
+                "image_url": cache_buster,
+                "caption": caption,
+                "access_token": PAGE_ACCESS_TOKEN
+            },
+            timeout=30
+        ).json()
+    except Exception as e:
+        logger.error(f"IG CREATE EXCEPTION: {e}")
+        return {"error": str(e)}
 
     if "id" not in create_res:
-        logger.error(f"CREATE ERROR: {create_res}")
+        logger.error(f"IG CREATE ERROR: {create_res}")
         return create_res
 
     creation_id = create_res["id"]
 
-    # STEP 2: WAIT for Meta to process the image
-    # We use 45 seconds to be safe on Render's network
-    time.sleep(45)
+    # STEP 2: Wait for meta processing
+    time.sleep(20)
 
     # STEP 3: Publish media
-    publish_res = requests.post(
-        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
-        data={
-            "creation_id": creation_id,
-            "access_token": PAGE_ACCESS_TOKEN
-        }
-    ).json()
+    try:
+        publish_res = requests.post(
+            f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
+            data={
+                "creation_id": creation_id,
+                "access_token": PAGE_ACCESS_TOKEN
+            },
+            timeout=30
+        ).json()
+    except Exception as e:
+        logger.error(f"IG PUBLISH EXCEPTION: {e}")
+        return {"error": str(e)}
 
     logger.info(f"PUBLISH RESPONSE: {publish_res}")
     return publish_res
 
+
 def post_category_wise_news():
     global IS_POSTING_BUSY
-    if IS_POSTING_BUSY or is_quiet_hours():
+
+    if IS_POSTING_BUSY:
+        logger.info("Posting already running. Skipping...")
         return
 
     try:
         IS_POSTING_BUSY = True
         logger.info("🚜 RVCJ Engine Started...")
+
         news_items = fetch_news(filter_posted=True)
-        
+
         for n in news_items:
             try:
-                # 1. Get Data from AI (Gemini/Groq/OpenRouter)
-                data = ai_rvcj_converter(n.get("summary", n["title"]))
-                
-                # 2. Unique Filename
+                # 1) AI
+                data = ai_rvcj_converter(n.get("summary", n.get("title", "")))
+
+                # 2) Unique Filename
                 img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3. Create Image
-                # Pass 'headline' and 'image_info' separately for the Wirally Teal Bar
+                # 3) Create Image
                 path = generate_news_image(
-                    headline=data['headline'], 
-                    info_text=data['image_info'], 
-                    image_url=n["image"], 
+                    headline=data.get("headline", "BREAKING"),
+                    info_text=data.get("image_info", "Details soon"),
+                    image_url=n.get("image"),
                     output_name=img_name
                 )
 
-                # 4. Upload to Cloudinary
-                # 🚨 FIXED: Named the variable 'public_url' to match the next line
+                # 4) Upload to Cloudinary
                 public_url = upload_image_to_cloudinary(path)
-                
                 if not public_url:
+                    logger.error("Cloudinary upload failed, skipping item.")
                     continue
 
-                # 5. Post to Instagram
-                # We use the 'short_caption' for the Instagram body
-                ig_res = post_to_instagram(public_url, data['short_caption'])
+                # 5) Post
+                caption = data.get("short_caption") or data.get("headline") or "🔥"
+                ig_res = post_to_instagram(public_url, caption)
 
-                if "id" in ig_res:
+                # 6) Save posted
+                if ig_res and "id" in ig_res:
                     mark_as_posted(n["link"])
-                    logger.info(f"✅ Posted Success: {data['headline']}")
-                    if os.path.exists(path):
-                        os.remove(path)
-                    
-                    # 20-minute gap to avoid spam filters
-                    time.sleep(1200) 
+                    logger.info(f"✅ Posted: {n.get('title')}")
                 else:
-                    logger.error(f"IG API Error: {ig_res}")
+                    logger.error(f"❌ IG failed: {ig_res}")
 
-            except Exception as e:
-                logger.error(f"Item error: {e}")
+                # Avoid spam posting
+                time.sleep(60)
+
+            except Exception as item_err:
+                logger.error(f"Item error: {item_err}")
                 continue
+
+    except Exception as e:
+        logger.error(f"post_category_wise_news error: {e}")
+
     finally:
         IS_POSTING_BUSY = False
+
 
 # ======================================================
 # 8. BACKGROUND WORKER & LIFESPAN

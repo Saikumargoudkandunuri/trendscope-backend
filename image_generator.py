@@ -6,73 +6,148 @@ from io import BytesIO
 # ================== PATHS ==================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "images", "output")
+FONT_REGULAR_PATH = os.path.join(BASE_DIR, "fonts", "arial.ttf")
 FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-W, H = 1080, 1080 
+W, H = 1080, 1080
 
-def get_font(size, bold=False):
-    """Helper to load font or fallback to default. Now accepts 'bold' argument."""
-    # Use arialbd.ttf for bold if you have it in your fonts folder
-    path = FONT_BOLD_PATH if bold else FONT_PATH
+def get_font(font_size: int, bold: bool = False):
+    """Load font or fallback to default"""
+    path = FONT_BOLD_PATH if bold else FONT_REGULAR_PATH
     try:
-        return ImageFont.truetype(path, size)
+        return ImageFont.truetype(path, font_size)
     except:
         return ImageFont.load_default()
 
-# Change the function definition line to match the app.py call exactly
 def generate_news_image(headline, info_text, image_url, output_name):
-    # ... inside the code, make sure get_font is called like this:
-    font = get_font(size, is_bold)
-    # 1. Create Base Canvas (Dark Mode)
-    img = Image.new("RGB", (1080, 1080), (15, 17, 26))
-    draw = ImageDraw.Draw(img)
-    
-    # 2. Main Photo Handling (Top 60%)
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(image_url, headers=headers, timeout=10)
-        photo = Image.open(BytesIO(r.content)).convert("RGB").resize((1080, 620), Image.Resampling.LANCZOS)
-        img.paste(photo, (0, 0))
-    except:
-        draw.rectangle([0, 0, 1080, 620], fill=(30, 35, 50))
+    """
+    Generates 1080x1080 news card image and returns saved image path.
+    Fixes: NameError: size / is_bold not defined
+    """
 
-    # 3. Wirally Style Translucent Bar
-    overlay = Image.new('RGBA', (1080, 1080), (0, 0, 0, 0))
-    draw_ov = ImageDraw.Draw(overlay)
-    bar_h = 430 
-    draw_ov.rectangle([0, 1080 - bar_h, 1080, 1080], fill=(13, 56, 74, 245)) 
+    import os
+    import requests
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont
+
+    # --- CONFIG ---
+    W, H = 1080, 1080
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    OUTPUT_DIR = os.path.join(BASE_DIR, "images", "output")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # If you don’t have fonts folder, it will fallback to default font automatically
+    FONT_REGULAR_PATH = os.path.join(BASE_DIR, "fonts", "arial.ttf")
+    FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
+
+    def get_font(font_size: int, bold: bool = False):
+        """Load font from file or fallback to default font."""
+        path = FONT_BOLD_PATH if bold else FONT_REGULAR_PATH
+        try:
+            return ImageFont.truetype(path, font_size)
+        except Exception:
+            return ImageFont.load_default()
+
+    # ---- Create base canvas ----
+    img = Image.new("RGB", (W, H), (15, 17, 26))
+    draw = ImageDraw.Draw(img)
+
+    # ---- 1) Load main image ----
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(image_url, headers=headers, timeout=12)
+        r.raise_for_status()
+
+        photo = Image.open(BytesIO(r.content)).convert("RGB")
+        photo = photo.resize((W, 620), Image.Resampling.LANCZOS)
+        img.paste(photo, (0, 0))
+    except Exception:
+        # fallback if image fails
+        draw.rectangle([0, 0, W, 620], fill=(30, 35, 50))
+
+    # ---- 2) Bottom overlay bar ----
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    bar_h = 430
+    odraw.rectangle([0, H - bar_h, W, H], fill=(13, 56, 74, 245))
     img.paste(overlay, (0, 0), overlay)
-    
-    # 4. Drawing Text Logic
-    def draw_text_auto(text, y, max_h, initial_size, is_bold):
-        size = initial_size
-        while size > 20:
-            font = get_font(size, is_bold)
-            lines, current_line = [], []
-            for word in text.split():
-                test_line = ' '.join(current_line + [word])
-                if draw.textbbox((0, 0), test_line, font=font)[2] <= 980:
-                    current_line.append(word)
-                else:
-                    lines.append(' '.join(current_line))
-                    current_line = [word]
-            lines.append(' '.join(current_line))
-            if len(lines) * (size + 12) <= max_h:
+
+    # ---- 3) Text helpers ----
+    def wrap_text_to_width(text, font, max_width):
+        words = text.split()
+        lines = []
+        current = []
+        for word in words:
+            test = " ".join(current + [word])
+            w = draw.textbbox((0, 0), test, font=font)[2]
+            if w <= max_width:
+                current.append(word)
+            else:
+                if current:
+                    lines.append(" ".join(current))
+                current = [word]
+        if current:
+            lines.append(" ".join(current))
+        return lines
+
+    def draw_text_auto(text, x, y, max_width, max_height, start_size, bold=True, line_gap=12):
+        """
+        Auto-scales font down until text fits inside max_height.
+        Returns final y position after drawing.
+        """
+        size = start_size
+        while size >= 18:
+            font = get_font(size, bold)
+            lines = wrap_text_to_width(text, font, max_width)
+            total_h = len(lines) * (size + line_gap)
+
+            if total_h <= max_height:
+                # draw
                 for line in lines:
-                    draw.text((50, y), line, fill=(255, 255, 255), font=font)
-                    y += (size + 12)
+                    draw.text((x, y), line, fill=(255, 255, 255), font=font)
+                    y += (size + line_gap)
                 return y
-            size -= 3
+
+            size -= 2
+
+        # fallback draw at smallest font
+        font = get_font(18, bold)
+        lines = wrap_text_to_width(text, font, max_width)
+        for line in lines[:6]:
+            draw.text((x, y), line, fill=(255, 255, 255), font=font)
+            y += 30
         return y
 
-    # Draw the big Headline
-    curr_y = draw_text_auto(headline.upper(), 1080 - 400, 140, 68, True)
-    # Draw the 3-4 lines of info
-    draw_text_auto(info_text.upper(), curr_y + 10, 240, 34, True)
+    # ---- 4) Draw headline and info ----
+    headline = (headline or "").strip().upper()
+    info_text = (info_text or "").strip().upper()
 
-    # 5. Branding & Save
-    draw.text((50, 1030), "FOLLOW @TRENDSCOPE | INDIA", fill=(0, 210, 255), font=get_font(24, True))
+    y1 = draw_text_auto(
+        headline,
+        x=50,
+        y=H - 400,
+        max_width=980,
+        max_height=140,
+        start_size=68,
+        bold=True
+    )
+
+    draw_text_auto(
+        info_text,
+        x=50,
+        y=y1 + 10,
+        max_width=980,
+        max_height=240,
+        start_size=34,
+        bold=True
+    )
+
+    # ---- 5) Footer ----
+    footer = "FOLLOW @GLOBALKNOWLEDGE | INDIA"
+    draw.text((50, 1030), footer, fill=(0, 210, 255), font=get_font(24, True))
+
+    # ---- Save ----
     save_path = os.path.join(OUTPUT_DIR, output_name)
     img.save(save_path)
     return save_path
