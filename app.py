@@ -30,7 +30,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from telegram_engine import telegram_fetch_loop
 from twitter_sources import TWITTER_RSS_SOURCES
-
+from contextlib import asynccontextmanager
+import os
+import threading
+import asyncio
+import uuid
+import time
+from fastapi import FastAPI
 
 
 # Local Application Import for your design logic
@@ -769,43 +775,110 @@ def run_background_worker():
 
 
 
+
+
+# ✅ 30 minutes gap between any social posts (Telegram/Twitter)
+SOCIAL_LAST_POST_AT = 0
+SOCIAL_POST_GAP_SECONDS = 30 * 60   # ✅ 30 minutes
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ✅ Ensure output folder exists
     os.makedirs(os.path.join("images", "output"), exist_ok=True)
 
-    # ✅ Start RSS engine background thread
+    # ======================================================
+    # ✅ 1) Start RSS Engine background thread
+    # ======================================================
     threading.Thread(target=run_background_worker, daemon=True).start()
+    logger.info("✅ RSS Background worker started")
 
-    # ✅ Function runs whenever Telegram message comes
-    async def on_telegram_event(text, source):
-        logger.info(f"✅ TG EVENT: {text[:80]}...")
+    # ======================================================
+    # ✅ 2) COMMON CALLBACK for Telegram + Twitter
+    # ======================================================
+    async def on_social_event(text: str, source: str):
+        """
+        This runs whenever:
+        ✅ Telegram message comes
+        ✅ Twitter RSS item comes
+        """
 
-        # 1) Convert into viral format
-        data = ai_rvcj_converter(text)
+        global SOCIAL_LAST_POST_AT
 
-        # 2) Create image
-        img_name = f"tg_{uuid.uuid4().hex}.png"
-        path = generate_news_image(
-            headline=data.get("headline", "CRICKET UPDATE"),
-            info_text=data.get("image_info", text[:120]),
-            image_url="https://images.unsplash.com/photo-1504711434969-e33886168f5c",
-            output_name=img_name
-        )
+        try:
+            text = (text or "").strip()
+            if not text:
+                return
 
-        # 3) Upload and post
-        public_url = upload_image_to_cloudinary(path)
-        if public_url:
+            # ✅ avoid spam: 30 min gap for ALL social sources
+            now = int(time.time())
+            if now - SOCIAL_LAST_POST_AT < SOCIAL_POST_GAP_SECONDS:
+                mins_left = int((SOCIAL_POST_GAP_SECONDS - (now - SOCIAL_LAST_POST_AT)) / 60)
+                logger.warning(f"⏳ Social gap active. Skip posting ({mins_left} min left). Source={source}")
+                return
+
+            logger.info(f"✅ SOCIAL EVENT from {source}: {text[:100]}")
+
+            # ✅ 1) Convert into viral format
+            data = ai_rvcj_converter(text)
+
+            # ✅ 2) Create image
+            img_name = f"social_{uuid.uuid4().hex}.png"
+            path = generate_news_image(
+                headline=data.get("headline", "CRICKET UPDATE"),
+                info_text=data.get("image_info", text[:120]),
+                image_url="https://images.unsplash.com/photo-1504711434969-e33886168f5c",
+                output_name=img_name
+            )
+
+            # ✅ 3) Upload + post
+            public_url = upload_image_to_cloudinary(path)
+            if not public_url:
+                logger.error("❌ Cloudinary upload failed")
+                return
+
             caption = data.get("short_caption") or data.get("headline") or "🔥"
-            post_to_instagram(public_url, caption)
+            ig_res = post_to_instagram(public_url, caption)
 
-    # ✅ Start Telegram engine as another background thread
+            # ✅ if success update timer
+            if ig_res and "id" in ig_res:
+                SOCIAL_LAST_POST_AT = int(time.time())
+                logger.info("✅ Social Post DONE ✅")
+            else:
+                logger.error(f"❌ Social Post Failed: {ig_res}")
+
+        except Exception as e:
+            logger.error(f"❌ on_social_event error: {e}")
+
+    # ======================================================
+    # ✅ 3) Start Telegram engine in background thread
+    # ======================================================
     def tg_runner():
-        asyncio.run(telegram_fetch_loop(on_telegram_event, logger))
+        try:
+            from telegram_engine import telegram_fetch_loop
+            asyncio.run(telegram_fetch_loop(on_social_event, logger))
+        except Exception as e:
+            logger.error(f"❌ Telegram runner crashed: {e}")
 
     threading.Thread(target=tg_runner, daemon=True).start()
+    logger.info("✅ Telegram thread started")
 
+    # ======================================================
+    # ✅ 4) Start Twitter engine (FREE RSS / Nitter) thread
+    # ======================================================
+    def twitter_runner():
+        try:
+            from twitter_engine import twitter_fetch_loop
+            twitter_fetch_loop(on_social_event, logger, poll_seconds=90)
+        except Exception as e:
+            logger.error(f"❌ Twitter runner crashed: {e}")
+
+    threading.Thread(target=twitter_runner, daemon=True).start()
+    logger.info("✅ Twitter thread started")
+
+    # ✅ DONE
     yield
+
 
 
 app = FastAPI(lifespan=lifespan)
