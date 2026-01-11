@@ -11,9 +11,13 @@ STATE_FILE = "telegram_state.json"
 
 # ✅ Add your cricket telegram channels (public usernames)
 TELEGRAM_CHANNELS = [
-    "CricbuzzOfficial",
-    "CricketUpdatesLive",
-    "CricketNews",
+    "Cricinformer",
+    "Cricketracker",
+    "Cricketgully",
+    "RadarXCricket",
+    "Ipl_Live_Score_IPL",
+    "mufatweets",
+    "cricket_raash",
 ]
 
 KEYWORDS = [
