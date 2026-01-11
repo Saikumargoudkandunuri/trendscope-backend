@@ -157,7 +157,8 @@ def upload_image_to_cloudinary(local_path):
 
 def ai_rvcj_converter(text):
     """
-    Wirally Engine: Gemini -> Groq -> OpenRouter fallback
+    Wirally Engine:
+    Gemini -> Groq -> DeepSeek -> Perplexity -> OpenRouter fallback
 
     RETURNS ALWAYS:
     {
@@ -166,6 +167,7 @@ def ai_rvcj_converter(text):
       "short_caption": "..."
     }
     """
+
     import os
     import re
     import json
@@ -173,7 +175,6 @@ def ai_rvcj_converter(text):
 
     text = (text or "").strip()
 
-    # ---- Helper: safe extractor for Groq/OpenRouter responses ----
     def safe_openai_style_content(resp_json):
         try:
             if not isinstance(resp_json, dict):
@@ -182,18 +183,13 @@ def ai_rvcj_converter(text):
             if not choices:
                 return None
             msg = choices[0].get("message", {})
-            if not msg:
-                return None
             return msg.get("content")
         except Exception:
             return None
 
-    # ---- Helper: normalize AI output into your final format ----
     def normalize_ai_json(raw):
         try:
             raw = (raw or "").strip()
-
-            # Extract JSON if AI adds extra text
             match = re.search(r"\{.*\}", raw, re.S)
             if match:
                 raw = match.group(0)
@@ -218,14 +214,12 @@ def ai_rvcj_converter(text):
             }
 
         except Exception:
-            fallback_headline = "BREAKING UPDATE"
-            if text:
-                fallback_headline = text[:50].upper()
-
+            # if not JSON, make best effort
+            fallback_headline = (text[:55].upper() if text else "BREAKING UPDATE")
             return {
                 "headline": fallback_headline,
                 "image_info": (text[:160] if text else "More details soon").replace("\n", " "),
-                "short_caption": "Trending update 🔥"
+                "short_caption": (text[:120] if text else "Trending update") + " 🔥"
             }
 
     if not text:
@@ -237,6 +231,8 @@ def ai_rvcj_converter(text):
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
     prompt = f"""
@@ -253,7 +249,9 @@ News text:
 {text}
 """.strip()
 
+    # =========================
     # 1) GEMINI
+    # =========================
     try:
         if GOOGLE_API_KEY:
             from google import genai
@@ -265,41 +263,77 @@ News text:
             raw = getattr(res, "text", "") or ""
             return normalize_ai_json(raw)
     except Exception as e:
-        logger.warning(f"Gemini Busy, switching to Groq... ({e})")
+        logger.warning(f"Gemini Busy, switching... ({e})")
 
+    # =========================
     # 2) GROQ
+    # =========================
     try:
         if GROQ_API_KEY:
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            }
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
             body = {
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.6
             }
-            r = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=body,
-                timeout=30
-            )
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=30)
             resp = r.json() if r.content else {}
-
             if r.status_code != 200 or "error" in resp:
-                raise Exception(f"Groq API Error: status={r.status_code}, resp={resp}")
-
+                raise Exception(resp)
             raw = safe_openai_style_content(resp)
             if not raw:
-                raise Exception(f"Groq response missing content: {resp}")
-
+                raise Exception("Groq missing content")
             return normalize_ai_json(raw)
-
     except Exception as e:
-        logger.warning(f"Groq Busy, switching to OpenRouter... ({e})")
+        logger.warning(f"Groq Busy, switching... ({e})")
 
-    # 3) OPENROUTER
+    # =========================
+    # 3) DEEPSEEK
+    # =========================
+    try:
+        if DEEPSEEK_API_KEY:
+            headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+            body = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.6
+            }
+            r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=body, timeout=30)
+            resp = r.json() if r.content else {}
+            if r.status_code != 200 or "error" in resp:
+                raise Exception(resp)
+            raw = safe_openai_style_content(resp)
+            if not raw:
+                raise Exception("DeepSeek missing content")
+            return normalize_ai_json(raw)
+    except Exception as e:
+        logger.warning(f"DeepSeek Busy, switching... ({e})")
+
+    # =========================
+    # 4) PERPLEXITY
+    # =========================
+    try:
+        if PERPLEXITY_API_KEY:
+            headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+            body = {
+                "model": "sonar",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.6
+            }
+            r = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=body, timeout=30)
+            resp = r.json() if r.content else {}
+            if r.status_code != 200 or "error" in resp:
+                raise Exception(resp)
+            raw = safe_openai_style_content(resp)
+            if not raw:
+                raise Exception("Perplexity missing content")
+            return normalize_ai_json(raw)
+    except Exception as e:
+        logger.warning(f"Perplexity Busy, switching... ({e})")
+
+    # =========================
+    # 5) OPENROUTER (LAST)
+    # =========================
     try:
         if OPENROUTER_API_KEY:
             headers = {
@@ -313,84 +347,26 @@ News text:
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.6
             }
-            r = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=body,
-                timeout=30
-            )
+            r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=30)
             resp = r.json() if r.content else {}
-
             if r.status_code != 200 or "error" in resp:
-                raise Exception(f"OpenRouter API Error: status={r.status_code}, resp={resp}")
-
+                raise Exception(resp)
             raw = safe_openai_style_content(resp)
             if not raw:
-                raise Exception(f"OpenRouter response missing content: {resp}")
-
+                raise Exception("OpenRouter missing content")
             return normalize_ai_json(raw)
-
-    except Exception as e:
-        logger.error(f"All AI brains failed! ({e})")
-
-    return {
-        "headline": "BREAKING UPDATE",
-        "image_info": text[:160].replace("\n", " "),
-        "short_caption": "Breaking update 🔥"
-    }
-
-    # =========================
-    # 3) OPENROUTER (LAST RESORT)
-    # =========================
-    try:
-        if OPENROUTER_API_KEY:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-
-                # Recommended by OpenRouter
-                "HTTP-Referer": os.getenv("APP_PUBLIC_URL", "https://trendscope-backend-fnsu.onrender.com"),
-                "X-Title": "Trendscope Wirally Engine"
-            }
-
-            body = {
-                "model": "openai/gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.6
-            }
-
-            r = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=body,
-                timeout=30
-            )
-
-            resp = r.json() if r.content else {}
-
-            if r.status_code != 200 or "error" in resp:
-                raise Exception(f"OpenRouter API Error: status={r.status_code}, resp={resp}")
-
-            raw = safe_openai_style_content(resp)
-
-            if not raw:
-                raise Exception(f"OpenRouter response missing content: {resp}")
-
-            out = normalize_ai_json(raw)
-            return out
-
     except Exception as e:
         logger.error(f"All AI brains failed! ({e})")
 
     # =========================
-    # FINAL FALLBACK
+    # FINAL fallback: NO AI
     # =========================
     return {
-        "headline": "BREAKING UPDATE",
+        "headline": text[:55].upper(),
         "image_info": text[:160].replace("\n", " "),
-        "short_caption": "Breaking update 🔥"
+        "short_caption": text[:120].replace("\n", " ") + " 🔥"
     }
-""
+
 
 # ======================================================
 # 6. NEWS ENGINE (Scoring & Fetching)
@@ -631,6 +607,15 @@ def post_to_instagram(image_url: str, caption: str):
 
 
 def post_category_wise_news():
+    """
+    Auto posting loop (RSS -> AI -> Image -> Cloudinary -> Instagram)
+
+    ✅ FIXED:
+    - prevents double running using IS_POSTING_BUSY
+    - posts ONLY 1 item per cycle (no spam)
+    - 30 minutes gap after successful post
+    - safe error handling for every item
+    """
     global IS_POSTING_BUSY
 
     if IS_POSTING_BUSY:
@@ -641,17 +626,24 @@ def post_category_wise_news():
         IS_POSTING_BUSY = True
         logger.info("🚜 RVCJ Engine Started...")
 
+        # ✅ Get news but skip already posted links
         news_items = fetch_news(filter_posted=True)
+
+        if not news_items:
+            logger.info("No new items found (all already posted).")
+            return
 
         for n in news_items:
             try:
-                # 1) AI
+                logger.info(f"📰 Processing: {n.get('title')}")
+
+                # 1) AI Convert
                 data = ai_rvcj_converter(n.get("summary", n.get("title", "")))
 
-                # 2) Unique Filename
+                # 2) Unique image file
                 img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3) Create Image
+                # 3) Generate image
                 path = generate_news_image(
                     headline=data.get("headline", "BREAKING"),
                     info_text=data.get("image_info", "Details soon"),
@@ -665,19 +657,27 @@ def post_category_wise_news():
                     logger.error("Cloudinary upload failed, skipping item.")
                     continue
 
-                # 5) Post
+                # 5) Post to Instagram
                 caption = data.get("short_caption") or data.get("headline") or "🔥"
                 ig_res = post_to_instagram(public_url, caption)
 
-                # 6) Save posted
-                if ig_res and "id" in ig_res:
+                # 6) Save posted + stop spam
+                if ig_res and isinstance(ig_res, dict) and "id" in ig_res:
                     mark_as_posted(n["link"])
-                    logger.info(f"✅ Posted: {n.get('title')}")
-                else:
-                    logger.error(f"❌ IG failed: {ig_res}")
+                    logger.info(f"✅ Posted Successfully: {n.get('title')}")
 
-                # Avoid spam posting
-                time.sleep(60)
+                    # ✅ IMPORTANT: 30 min gap AFTER successful post
+                    logger.info("⏳ Sleeping 30 minutes before next post...")
+                    time.sleep(30 * 60)   # ✅ 30 minutes
+                    break
+
+                else:
+                    logger.error(f"❌ IG post failed: {ig_res}")
+
+                    # if cooldown active, do not retry immediately
+                    if isinstance(ig_res, dict) and ig_res.get("error") == "cooldown_active":
+                        logger.warning("⏳ IG cooldown active. Stop this cycle.")
+                        break
 
             except Exception as item_err:
                 logger.error(f"Item error: {item_err}")
@@ -688,6 +688,7 @@ def post_category_wise_news():
 
     finally:
         IS_POSTING_BUSY = False
+
 def post_cricket_news():
     global IS_POSTING_BUSY
 

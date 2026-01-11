@@ -1,15 +1,13 @@
 import os
 import asyncio
-import json
+import logging
+import time
 from telethon import TelegramClient
+from telethon.errors.rpcerrorlist import UsernameInvalidError, UsernameNotOccupiedError
+from telethon.tl.functions.contacts import ResolveUsernameRequest
 
-TG_API_ID = int(os.getenv("TG_API_ID", "0"))
-TG_API_HASH = os.getenv("TG_API_HASH", "")
-TG_SESSION = os.getenv("TG_SESSION", "trendscope_session")
+logger = logging.getLogger("uvicorn.error")
 
-STATE_FILE = "telegram_state.json"
-
-# ✅ Add your cricket telegram channels (public usernames)
 TELEGRAM_CHANNELS = [
     "Cricinformer",
     "Cricketracker",
@@ -20,64 +18,73 @@ TELEGRAM_CHANNELS = [
     "cricket_raash",
 ]
 
-KEYWORDS = [
-    "india", "wicket", "out", "six", "four", "dropped", "catch",
-    "50", "100", "record", "milestone", "run out", "lbw"
-]
+API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
+API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+SESSION_FILE = "trendscope_session"
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {"last_ids": {}}
+client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+
+async def safe_resolve_username(username: str):
+    """
+    Resolve telegram username to entity safely.
+    Returns entity or None
+    """
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {"last_ids": {}}
+        username = username.strip().replace("@", "").replace("https://t.me/", "").replace("t.me/", "")
+        if not username:
+            return None
 
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False)
+        # check regex requirements (avoids unacceptable username error)
+        # must start with letter and 5+ length basically
+        if len(username) < 4:
+            return None
 
-def is_cricket_msg(msg: str) -> bool:
-    t = (msg or "").lower()
-    return any(k in t for k in KEYWORDS)
+        result = await client(ResolveUsernameRequest(username))
+        if result and result.chats:
+            return result.chats[0]
+        if result and result.users:
+            return result.users[0]
+        return None
 
-async def telegram_fetch_loop(on_event, logger):
-    if not TG_API_ID or not TG_API_HASH:
-        logger.error("❌ Telegram keys missing.")
-        return
+    except (UsernameInvalidError, UsernameNotOccupiedError) as e:
+        logger.error(f"❌ Invalid TG username: {username} -> {e}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Resolve error {username}: {e}")
+        return None
 
-    client = TelegramClient(TG_SESSION, TG_API_ID, TG_API_HASH)
-    state = load_state()
 
-    async with client:
-        logger.info("📨 Telegram Engine Started...")
+async def telegram_loop():
+    logger.info("📨 Telegram Engine Started...")
 
-        while True:
-            try:
-                for ch in TELEGRAM_CHANNELS:
-                    last_id = state["last_ids"].get(ch, 0)
+    await client.start()
 
-                    async for m in client.iter_messages(ch, limit=10):
-                        if not m or not m.id or not m.message:
+    while True:
+        try:
+            for ch in TELEGRAM_CHANNELS:
+                entity = await safe_resolve_username(ch)
+                if not entity:
+                    continue
+
+                try:
+                    async for msg in client.iter_messages(entity, limit=5):
+                        text = (msg.message or "").strip()
+                        if not text:
                             continue
 
-                        if m.id <= last_id:
-                            continue
+                        # you can send this text into cricket post generator
+                        logger.info(f"TG [{ch}] => {text[:80]}")
 
-                        text = m.message.strip()
-
-                        if not is_cricket_msg(text):
-                            continue
-
-                        state["last_ids"][ch] = m.id
-                        source_url = f"https://t.me/{ch}/{m.id}"
-
-                        await on_event(text, source_url)
-
-                save_state(state)
-
-            except Exception as e:
-                logger.error(f"Telegram loop error: {e}")
+                except Exception as ex:
+                    logger.error(f"❌ Telegram channel read error {ch}: {ex}")
+                    continue
 
             await asyncio.sleep(60)
+
+        except Exception as e:
+            logger.error(f"Telegram loop error: {e}")
+            await asyncio.sleep(60)
+
+
+def start_telegram_engine():
+    asyncio.run(telegram_loop())
