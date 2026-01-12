@@ -18,7 +18,8 @@ import openai
 from datetime import datetime
 from contextlib import asynccontextmanager
 from contextlib import asynccontextmanager
-from fallback_images import get_fallback_image_url
+from fallback_images import FALLBACK_IMAGES, get_fallback_image_url
+
 
 import os
 import threading
@@ -28,7 +29,6 @@ import random
 from fastapi import FastAPI
 
 from telegram_engine import telegram_fetch_loop
-from image_generator import FALLBACK_IMAGES
 import cloudinary
 import cloudinary.uploader
 from google import genai
