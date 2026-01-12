@@ -48,6 +48,19 @@ import asyncio
 import uuid
 import time
 from fastapi import FastAPI
+import os
+import uuid
+import random
+import threading
+import time
+import asyncio
+import logging
+
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fallback_images import FALLBACK_IMAGES, get_fallback_image_url
+
 
 
 # Local Application Import for your design logic
@@ -399,12 +412,10 @@ def ai_category(text):
 def ai_trending_score(title):
     return min(95, 40 + sum(k in title.lower() for k in ["india","court","modi","breaking"]) * 10)
 
-from image_generator import FALLBACK_IMAGES
+from fallback_images import FALLBACK_IMAGES, get_fallback_image_url
+
 import random
 
-from image_generator import get_fallback_image_url
-
-from image_generator import get_fallback_image_url
 
 def extract_image(entry):
     # 1) RSS image
