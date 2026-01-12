@@ -142,11 +142,11 @@ async def telegram_loop(on_event=None, logger=None):
                     _log_err(logger, f"❌ Telegram read error {ch}: {ex}")
                     continue
 
-            await asyncio.sleep(30)
+            await asyncio.sleep(20 * 60)
 
         except Exception as e:
             _log_err(logger, f"Telegram loop error: {e}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(20 * 60)
 
 
 def telegram_fetch_loop(on_event=None, logger=None):

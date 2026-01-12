@@ -660,7 +660,7 @@ def post_to_instagram(local_image_path: str, caption: str):
 
         err = create_res.get("error", {})
         if err.get("code") == 4 or err.get("error_subcode") == 2207051:
-            cd["blocked_until"] = int(time.time()) + 60 * 60
+            cd["blocked_until"] = int(time.time()) + 70 * 60
             save_cooldown(cd)
             logger.error("🚫 IG blocked. Cooling down for 60 minutes.")
         return create_res
