@@ -17,7 +17,18 @@ import pytz
 import openai
 from datetime import datetime
 from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
+from fallback_images import get_fallback_image_url
 
+import os
+import threading
+import asyncio
+import uuid
+import random
+from fastapi import FastAPI
+
+from telegram_engine import telegram_fetch_loop
+from image_generator import FALLBACK_IMAGES
 import cloudinary
 import cloudinary.uploader
 from google import genai
@@ -388,10 +399,38 @@ def ai_category(text):
 def ai_trending_score(title):
     return min(95, 40 + sum(k in title.lower() for k in ["india","court","modi","breaking"]) * 10)
 
+from image_generator import FALLBACK_IMAGES
+import random
+
+from image_generator import get_fallback_image_url
+
+from image_generator import get_fallback_image_url
+
 def extract_image(entry):
+    # 1) RSS image
     if "media_content" in entry and entry.media_content:
-        return entry.media_content[0].get("url")
-    return "https://images.unsplash.com/photo-1504711434969-e33886168f5c"
+        img = entry.media_content[0].get("url")
+        if img:
+            return img
+
+    # 2) RSS thumbnail
+    if "media_thumbnail" in entry and entry.media_thumbnail:
+        img = entry.media_thumbnail[0].get("url")
+        if img:
+            return img
+
+    # 3) enclosure links
+    if "links" in entry:
+        for l in entry.links:
+            if l.get("type", "").startswith("image/"):
+                return l.get("href")
+
+    # ✅ Dynamic fallback
+    return get_fallback_image_url("unsplash")
+
+
+
+
 
 def fetch_news(filter_posted=False):
     global NEWS_CACHE
@@ -501,12 +540,15 @@ def fetch_twitter_cricket(filter_posted=True):
 # 7. INSTAGRAM & AUTO-POST CORE
 # ======================================================
 
-def post_to_instagram(image_url: str, caption: str):
+def post_to_instagram(local_image_path: str, caption: str):
     """
-    Safe Instagram posting with:
-    - global rate limiter
-    - IG action-block cooldown
-    - cache buster
+    FULL Instagram posting function with Cloudinary:
+    ✅ Upload local image to Cloudinary
+    ✅ Global limiter (post_limiter.py)
+    ✅ IG cooldown file if blocked
+    ✅ Cache buster to avoid repeated image
+    ✅ Create + Publish
+    ✅ Returns publish response
     """
 
     import time
@@ -514,114 +556,156 @@ def post_to_instagram(image_url: str, caption: str):
     import json
     import os
     import requests
+
+    # --- Global limiter ---
     from post_limiter import can_post_now, mark_posted_now
 
-    # ---------- GLOBAL RATE LIMIT ----------
+    # --- Cloudinary uploader (your existing function) ---
+    # Uses: cloudinary.config(...) already defined globally
+    def upload_image_to_cloudinary(local_path):
+        try:
+            res = cloudinary.uploader.upload(
+                local_path,
+                folder="trendscope",
+                access_mode="public"
+            )
+            return res.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary Error: {e}")
+            return None
+
+    # 1) global cooldown limiter check
     if not can_post_now():
         logger.warning("⏳ Global post limiter: skipping this post")
         return {"error": "rate_limit_global"}
 
+    # 2) validate IG env
+    if not IG_BUSINESS_ID or not PAGE_ACCESS_TOKEN:
+        logger.error("❌ Missing IG_BUSINESS_ID or PAGE_ACCESS_TOKEN")
+        return {"error": "missing_ig_config"}
+
+    # 3) caption safety
+    caption = (caption or "").strip()
+    if not caption:
+        caption = "🔥 Trending update"
+
+    # 4) upload image to cloudinary
+    public_url = upload_image_to_cloudinary(local_image_path)
+    if not public_url:
+        logger.error("❌ Cloudinary upload failed")
+        return {"error": "cloudinary_upload_failed"}
+
+    # 5) IG cooldown file
     COOLDOWN_FILE = "ig_cooldown.json"
 
     def load_cooldown():
         if not os.path.exists(COOLDOWN_FILE):
             return {"blocked_until": 0}
         try:
-            with open(COOLDOWN_FILE, "r") as f:
+            with open(COOLDOWN_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
             return {"blocked_until": 0}
 
     def save_cooldown(data):
         try:
-            with open(COOLDOWN_FILE, "w") as f:
+            with open(COOLDOWN_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f)
         except:
             pass
 
-    # ---------- COOLDOWN CHECK ----------
     cd = load_cooldown()
     now = int(time.time())
+    blocked_until = int(cd.get("blocked_until", 0))
 
-    if now < int(cd.get("blocked_until", 0)):
-        mins = (cd["blocked_until"] - now) // 60
+    if now < blocked_until:
+        mins = int((blocked_until - now) / 60)
         logger.warning(f"⏳ IG cooldown active. {mins} min remaining.")
-        return {"error": "cooldown_active", "blocked_until": cd["blocked_until"]}
+        return {"error": "cooldown_active", "blocked_until": blocked_until}
 
-    # ---------- CACHE BUSTER ----------
-    image_url = f"{image_url}?v={random.randint(100000,999999)}"
+    # 6) Cache buster so IG will NOT reuse same cloudinary image
+    cache_buster_url = f"{public_url}?v={random.randint(100000, 999999)}"
 
-    # ---------- STEP 1: CREATE MEDIA ----------
+    # ------------------------------
+    # STEP 1: CREATE MEDIA CONTAINER
+    # ------------------------------
     try:
         create_res = requests.post(
             f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media",
             data={
-                "image_url": image_url,
+                "image_url": cache_buster_url,
                 "caption": caption,
                 "access_token": PAGE_ACCESS_TOKEN
             },
-            timeout=30
+            timeout=45
         ).json()
     except Exception as e:
         logger.error(f"IG CREATE EXCEPTION: {e}")
         return {"error": str(e)}
 
+    # handle create errors
     if "error" in create_res:
         logger.error(f"IG CREATE ERROR: {create_res}")
 
-        err = create_res["error"]
+        err = create_res.get("error", {})
         if err.get("code") == 4 or err.get("error_subcode") == 2207051:
-            cd["blocked_until"] = now + 3600
+            cd["blocked_until"] = int(time.time()) + 60 * 60
             save_cooldown(cd)
-            logger.error("🚫 IG action blocked. Cooling down 60 mins.")
-
+            logger.error("🚫 IG blocked. Cooling down for 60 minutes.")
         return create_res
 
-    creation_id = create_res.get("id")
-    if not creation_id:
+    if "id" not in create_res:
+        logger.error(f"IG CREATE ERROR (no id): {create_res}")
         return create_res
 
-    # ---------- STEP 2: WAIT ----------
-    time.sleep(70 * 60)
+    creation_id = create_res["id"]
 
-    # ---------- STEP 3: PUBLISH ----------
-    publish_res = requests.post(
-        f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
-        data={
-            "creation_id": creation_id,
-            "access_token": PAGE_ACCESS_TOKEN
-        },
-        timeout=30
-    ).json()
+    # ------------------------------
+    # STEP 2: WAIT FOR PROCESSING
+    # ------------------------------
+    time.sleep(20)
+
+    # ------------------------------
+    # STEP 3: PUBLISH MEDIA
+    # ------------------------------
+    try:
+        publish_res = requests.post(
+            f"https://graph.facebook.com/v18.0/{IG_BUSINESS_ID}/media_publish",
+            data={
+                "creation_id": creation_id,
+                "access_token": PAGE_ACCESS_TOKEN
+            },
+            timeout=45
+        ).json()
+    except Exception as e:
+        logger.error(f"IG PUBLISH EXCEPTION: {e}")
+        return {"error": str(e)}
 
     logger.info(f"PUBLISH RESPONSE: {publish_res}")
 
+    # handle publish errors
     if "error" in publish_res:
-        err = publish_res["error"]
+        logger.error(f"❌ IG failed: {publish_res}")
+
+        err = publish_res.get("error", {})
         if err.get("code") == 4 or err.get("error_subcode") == 2207051:
-            cd["blocked_until"] = int(time.time()) + 3600
+            cd["blocked_until"] = int(time.time()) + 60 * 60
             save_cooldown(cd)
             logger.error("🚫 IG blocked after publish. Cooling down.")
-
         return publish_res
 
-    # ---------- SUCCESS ----------
+    # ✅ mark posted now
     mark_posted_now()
-    return publish_res
 
-    return publish_res
+    # ✅ return both cloudinary + IG publish
+    return {
+        "status": "success",
+        "cloudinary_url": public_url,
+        "ig_publish": publish_res
+    }
 
 
 def post_category_wise_news():
-    """
-    Auto posting loop (RSS -> AI -> Image -> Cloudinary -> Instagram)
-
-    ✅ FIXED:
-    - prevents double running using IS_POSTING_BUSY
-    - posts ONLY 1 item per cycle (no spam)
-    - 30 minutes gap after successful post
-    - safe error handling for every item
-    """
     global IS_POSTING_BUSY
 
     if IS_POSTING_BUSY:
@@ -632,28 +716,25 @@ def post_category_wise_news():
         IS_POSTING_BUSY = True
         logger.info("🚜 RVCJ Engine Started...")
 
-        # ✅ Get news but skip already posted links
         news_items = fetch_news(filter_posted=True)
-
-        if not news_items:
-            logger.info("No new items found (all already posted).")
-            return
 
         for n in news_items:
             try:
-                logger.info(f"📰 Processing: {n.get('title')}")
-
-                # 1) AI Convert
+                # ✅ STOP POSTING IF IG IS IN COOLDOWN
+                # (post_to_instagram already returns cooldown_active)
+                # We just break to avoid trying all items.
+                
+                # 1) AI
                 data = ai_rvcj_converter(n.get("summary", n.get("title", "")))
 
-                # 2) Unique image file
+                # 2) Unique Filename
                 img_name = f"post_{uuid.uuid4().hex}.png"
 
-                # 3) Generate image
+                # 3) Create Image
                 path = generate_news_image(
                     headline=data.get("headline", "BREAKING"),
                     info_text=data.get("image_info", "Details soon"),
-                    image_url=n.get("image"),
+                    image_url=n.get("image") or extract_image(n),
                     output_name=img_name
                 )
 
@@ -663,27 +744,24 @@ def post_category_wise_news():
                     logger.error("Cloudinary upload failed, skipping item.")
                     continue
 
-                # 5) Post to Instagram
+                # 5) Post
                 caption = data.get("short_caption") or data.get("headline") or "🔥"
                 ig_res = post_to_instagram(public_url, caption)
 
-                # 6) Save posted + stop spam
-                if ig_res and isinstance(ig_res, dict) and "id" in ig_res:
+                # 6) Save posted
+                if ig_res and "id" in ig_res:
                     mark_as_posted(n["link"])
-                    logger.info(f"✅ Posted Successfully: {n.get('title')}")
-
-                    # ✅ IMPORTANT: 30 min gap AFTER successful post
-                    logger.info("⏳ Sleeping 30 minutes before next post...")
-                    time.sleep(70 * 60)   # ✅ 1hour10 minutes
-                    break
-
+                    logger.info(f"✅ Posted: {n.get('title')}")
                 else:
-                    logger.error(f"❌ IG post failed: {ig_res}")
+                    logger.error(f"❌ IG failed: {ig_res}")
 
-                    # if cooldown active, do not retry immediately
+                    # ✅ If cooldown triggered → stop cycle
                     if isinstance(ig_res, dict) and ig_res.get("error") == "cooldown_active":
                         logger.warning("⏳ IG cooldown active. Stop this cycle.")
                         break
+
+                # ❌ IMPORTANT: NO time.sleep(60) HERE
+                # Posting gap will be controlled globally in worker.py / limiter
 
             except Exception as item_err:
                 logger.error(f"Item error: {item_err}")
@@ -694,6 +772,7 @@ def post_category_wise_news():
 
     finally:
         IS_POSTING_BUSY = False
+
 
 def post_cricket_news():
     global IS_POSTING_BUSY
@@ -761,17 +840,37 @@ def post_cricket_news():
 # ======================================================
 
 def run_background_worker():
+    """
+    Background worker:
+    ✅ checks RSS and posts
+    ✅ EXACT gap between cycles = 1 hour 10 mins
+    ✅ prevents crashing loops
+    ✅ respects quiet hours
+    """
+
+    GAP_SECONDS = 4200  # ✅ 1 hour 10 minutes
+
     while True:
         try:
-            # Normal news cycle
+            # quiet hours safety
+            if is_quiet_hours():
+                logger.warning("🌙 Quiet hours active. Worker sleeping 30 min.")
+                time.sleep(1800)  # 30 minutes sleep during quiet hours
+                continue
+
+            logger.info("📰 RSS worker cycle started...")
+
+            # ✅ this will automatically post only if not already posted
             post_category_wise_news()
 
-            # Cricket cycle
-            post_cricket_news()
+            logger.info(f"✅ Worker sleeping for {GAP_SECONDS} seconds...")
+            time.sleep(GAP_SECONDS)
 
-            time.sleep(300)
-        except:
-            time.sleep(70 * 60)
+        except Exception as e:
+            logger.error(f"❌ Worker loop crashed: {e}")
+            time.sleep(600)  # wait 10 min on crash
+
+
 
 
 
@@ -784,102 +883,93 @@ SOCIAL_POST_GAP_SECONDS = 70 * 60   # ✅ 30 minutes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Full lifespan engine:
+    ✅ ensures folders exist
+    ✅ starts RSS worker thread
+    ✅ starts Telegram loop thread
+    ✅ converts telegram msgs to post
+    ✅ generates image -> cloudinary -> instagram
+    ✅ avoids repeated images using FALLBACK_IMAGES rotation
+    """
+
     # ✅ Ensure output folder exists
     os.makedirs(os.path.join("images", "output"), exist_ok=True)
 
-    # ======================================================
-    # ✅ 1) Start RSS Engine background thread
-    # ======================================================
+    # ✅ Start RSS worker thread
     threading.Thread(target=run_background_worker, daemon=True).start()
     logger.info("✅ RSS Background worker started")
 
-    # ======================================================
-    # ✅ 2) COMMON CALLBACK for Telegram + Twitter
-    # ======================================================
-    async def on_social_event(text: str, source: str):
+    # ✅ Telegram handler
+    async def on_telegram_event(text, source):
         """
-        This runs whenever:
-        ✅ Telegram message comes
-        ✅ Twitter RSS item comes
+        Runs whenever telegram message arrives.
+        Converts it into RVCJ format & posts to IG.
         """
-
-        global SOCIAL_LAST_POST_AT
-
         try:
             text = (text or "").strip()
             if not text:
                 return
 
-            # ✅ avoid spam: 30 min gap for ALL social sources
-            now = int(time.time())
-            if now - SOCIAL_LAST_POST_AT < SOCIAL_POST_GAP_SECONDS:
-                mins_left = int((SOCIAL_POST_GAP_SECONDS - (now - SOCIAL_LAST_POST_AT)) / 60)
-                logger.warning(f"⏳ Social gap active. Skip posting ({mins_left} min left). Source={source}")
+            logger.info(f"✅ SOCIAL EVENT from {source}: {text[:80]}...")
+
+            # ✅ quiet hours check (your existing feature)
+            if is_quiet_hours():
+                logger.warning("🌙 Quiet hours active. Skipping telegram post.")
                 return
 
-            logger.info(f"✅ SOCIAL EVENT from {source}: {text[:100]}")
-
-            # ✅ 1) Convert into viral format
+            # ✅ convert telegram text into viral format
             data = ai_rvcj_converter(text)
 
-            # ✅ 2) Create image
-            img_name = f"social_{uuid.uuid4().hex}.png"
+            # ✅ unique image name
+            img_name = f"tg_{uuid.uuid4().hex}.png"
+
+            # ✅ IMPORTANT:
+            # Telegram message has no image, so use rotating fallback images
+            bg_image_url = random.choice(FALLBACK_IMAGES)
+
+            # ✅ generate image
             path = generate_news_image(
                 headline=data.get("headline", "CRICKET UPDATE"),
                 info_text=data.get("image_info", text[:120]),
-                image_url="https://images.unsplash.com/photo-1504711434969-e33886168f5c",
+                image_url=bg_image_url,
                 output_name=img_name
             )
 
-            # ✅ 3) Upload + post
+            # ✅ upload to cloudinary (YOUR FEATURE)
             public_url = upload_image_to_cloudinary(path)
             if not public_url:
-                logger.error("❌ Cloudinary upload failed")
+                logger.error("❌ Cloudinary upload failed for Telegram post.")
                 return
 
+            # ✅ post to instagram (YOUR FEATURE)
             caption = data.get("short_caption") or data.get("headline") or "🔥"
             ig_res = post_to_instagram(public_url, caption)
 
-            # ✅ if success update timer
-            if ig_res and "id" in ig_res:
-                SOCIAL_LAST_POST_AT = int(time.time())
-                logger.info("✅ Social Post DONE ✅")
+            # ✅ if posted success
+            if ig_res and isinstance(ig_res, dict) and "id" in ig_res:
+                # Telegram does not have a URL like RSS
+                # So we mark unique telegram signature into Supabase
+                unique_key = f"telegram::{source}::{hash(text)}"
+                mark_as_posted(unique_key)
+                logger.info("✅ Telegram post uploaded successfully.")
             else:
-                logger.error(f"❌ Social Post Failed: {ig_res}")
+                logger.error(f"❌ Telegram IG failed: {ig_res}")
 
         except Exception as e:
-            logger.error(f"❌ on_social_event error: {e}")
+            logger.error(f"❌ Telegram handler error: {e}")
 
-    # ======================================================
-    # ✅ 3) Start Telegram engine in background thread
-    # ======================================================
+    # ✅ Telegram runner in background thread
     def tg_runner():
         try:
-            from telegram_engine import telegram_fetch_loop
-            asyncio.run(telegram_fetch_loop(on_social_event, logger))
+            asyncio.run(telegram_fetch_loop(on_telegram_event, logger))
         except Exception as e:
-            logger.error(f"❌ Telegram runner crashed: {e}")
+            logger.error(f"Telegram engine crashed: {e}")
 
     threading.Thread(target=tg_runner, daemon=True).start()
     logger.info("✅ Telegram thread started")
 
-    # ======================================================
-    # ✅ 4) Start Twitter engine (FREE RSS / Nitter) thread
-    # ======================================================
-    def twitter_runner():
-        try:
-            from twitter_engine import twitter_fetch_loop
-            twitter_fetch_loop(on_social_event, logger, poll_seconds=90)
-        except Exception as e:
-            logger.error(f"❌ Twitter runner crashed: {e}")
-
-    threading.Thread(target=twitter_runner, daemon=True).start()
-    logger.info("✅ Twitter thread started")
-
-    # ✅ DONE
     yield
-
-
 
 app = FastAPI(lifespan=lifespan)
 
