@@ -454,10 +454,6 @@ def extract_image(entry):
     # ✅ Dynamic fallback
     return get_fallback_image_url("unsplash")
 
-
-
-
-
 def fetch_news(filter_posted=False):
     global NEWS_CACHE
     NEWS_CACHE = {}
@@ -494,9 +490,12 @@ def fetch_news(filter_posted=False):
                 out.append(art)
                 i += 1
         except Exception as e:
-            # logger.error(f"RSS Error {src}: {e}") # Optional logging
             continue
     return out
+
+
+
+
 def fetch_cricket_news(filter_posted=True):
     """
     Fetch cricket items from CRICKET_RSS_SOURCES
