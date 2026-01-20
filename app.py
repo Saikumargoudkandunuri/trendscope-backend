@@ -180,7 +180,16 @@ def upload_image_to_cloudinary(local_path):
     except Exception as e:
         logger.error(f"Cloudinary Error: {e}")
         return None
-
+def clean_html(raw_html):
+    """
+    Removes HTML tags (like <a href...>) from text.
+    Fixes the issue where raw code appears in the image.
+    """
+    if not raw_html:
+        return ""
+    # Regex to remove anything between < and >
+    clean = re.sub(r'<.*?>', '', str(raw_html))
+    return clean.strip()
 # ======================================================
 # 5. AI LOGIC (The RVCJ Hinglish Converter)
 # ======================================================
@@ -387,16 +396,22 @@ News text:
             return normalize_ai_json(raw)
     except Exception as e:
         logger.error(f"All AI brains failed! ({e})")
-
     # =========================
     # FINAL fallback: NO AI
     # =========================
-    return {
-        "headline": text[:55].upper(),
-        "image_info": text[:160].replace("\n", " "),
-        "short_caption": text[:120].replace("\n", " ") + " 🔥"
-    }
+    # Double check cleaning just in case
+    clean_text = clean_html(text)
+    
+    # Try to grab just the first sentence so the headline isn't cut off mid-word
+    headline_text = clean_text.split('.')[0]
+    if len(headline_text) > 55:
+        headline_text = headline_text[:50] + "..."
 
+    return {
+        "headline": headline_text.upper(),
+        "image_info": clean_text[:160].replace("\n", " "),
+        "short_caption": clean_text[:120].replace("\n", " ") + " 🔥"
+    }
 
 # ======================================================
 # 6. NEWS ENGINE (Scoring & Fetching)
@@ -443,26 +458,33 @@ def extract_image(entry):
 
 
 
-def fetch_news(filter_posted=False):
+def def fetch_news(filter_posted=False):
     global NEWS_CACHE
     NEWS_CACHE = {}
     out, i = [], 0
     
-    # Only load posted_ids if we actually want to filter them
     posted_ids = load_posted() if filter_posted else set()
     
     for src, url in RSS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
             for e in feed.entries[:6]:
-                # If filtering is ON, skip already posted links
+                # Filter posted
                 if filter_posted and e.link in posted_ids:
                     continue
-                    
+                
+                # --- FIX: CLEAN HTML FROM SUMMARY ---
+                raw_summary = e.get("summary", "")
+                clean_text = clean_html(raw_summary)
+                
+                # If cleaning makes it empty (or it's just a link), use the Title instead
+                if len(clean_text) < 20:
+                    clean_text = e.title
+                
                 art = {
                     "id": i, 
                     "title": e.title, 
-                    "summary": e.get("summary", e.title),
+                    "summary": clean_text, # Now safe to use
                     "link": e.link, 
                     "image": extract_image(e),
                     "trend": ai_trending_score(e.title), 
@@ -471,7 +493,9 @@ def fetch_news(filter_posted=False):
                 NEWS_CACHE[i] = art
                 out.append(art)
                 i += 1
-        except: continue
+        except Exception as e:
+            # logger.error(f"RSS Error {src}: {e}") # Optional logging
+            continue
     return out
 def fetch_cricket_news(filter_posted=True):
     """
