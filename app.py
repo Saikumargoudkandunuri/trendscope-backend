@@ -458,7 +458,7 @@ def extract_image(entry):
 
 
 
-def def fetch_news(filter_posted=False):
+def fetch_news(filter_posted=False):
     global NEWS_CACHE
     NEWS_CACHE = {}
     out, i = [], 0
