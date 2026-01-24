@@ -1,19 +1,19 @@
+# --- START OF FILE image_generator.py ---
 import os
-from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 
 # ================== PATHS ==================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "images", "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Fonts: Auto-fallback if files missing
 FONT_REGULAR_PATH = os.path.join(BASE_DIR, "fonts", "arial.ttf")
 FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-W, H = 1080, 1080
-
 def get_font(font_size: int, bold: bool = False):
-    """Load font or fallback to default"""
     path = FONT_BOLD_PATH if bold else FONT_REGULAR_PATH
     try:
         return ImageFont.truetype(path, font_size)
@@ -22,132 +22,98 @@ def get_font(font_size: int, bold: bool = False):
 
 def generate_news_image(headline, info_text, image_url, output_name):
     """
-    Generates 1080x1080 news card image and returns saved image path.
-    Fixes: NameError: size / is_bold not defined
+    Generates a 1080x1080 social media post.
+    ✅ Feature: Draws a 'Safety Box' if the image URL fails.
     """
-
-    import os
-    import requests
-    from io import BytesIO
-    from PIL import Image, ImageDraw, ImageFont
-
-    # --- CONFIG ---
     W, H = 1080, 1080
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    OUTPUT_DIR = os.path.join(BASE_DIR, "images", "output")
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # If you don’t have fonts folder, it will fallback to default font automatically
-    FONT_REGULAR_PATH = os.path.join(BASE_DIR, "fonts", "arial.ttf")
-    FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
-
-    def get_font(font_size: int, bold: bool = False):
-        """Load font from file or fallback to default font."""
-        path = FONT_BOLD_PATH if bold else FONT_REGULAR_PATH
-        try:
-            return ImageFont.truetype(path, font_size)
-        except Exception:
-            return ImageFont.load_default()
-
-    # ---- Create base canvas ----
+    
+    # 1. Base Canvas (Dark Blue/Grey)
     img = Image.new("RGB", (W, H), (15, 17, 26))
     draw = ImageDraw.Draw(img)
 
-    # ---- 1) Load main image ----
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(image_url, headers=headers, timeout=12)
-        r.raise_for_status()
+    # 2. Try to Download Image
+    image_loaded = False
+    
+    if image_url and "http" in image_url:
+        try:
+            # User-Agent prevents 403 Forbidden errors
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            r = requests.get(image_url, headers=headers, timeout=10)
+            
+            if r.status_code == 200:
+                photo = Image.open(BytesIO(r.content)).convert("RGB")
+                # Resize/Crop to fit top half
+                photo = photo.resize((W, 620), Image.Resampling.LANCZOS)
+                img.paste(photo, (0, 0))
+                image_loaded = True
+        except Exception as e:
+            print(f"⚠️ Image Error: {e}")
 
-        photo = Image.open(BytesIO(r.content)).convert("RGB")
-        photo = photo.resize((W, 620), Image.Resampling.LANCZOS)
-        img.paste(photo, (0, 0))
-    except Exception:
-        # fallback if image fails
+    # 3. SAFETY BOX (If image failed)
+    if not image_loaded:
+        # Draw placeholder rectangle
         draw.rectangle([0, 0, W, 620], fill=(30, 35, 50))
+        draw.rectangle([20, 20, W-20, 600], outline=(0, 200, 255), width=4)
+        
+        # Draw "BREAKING NEWS" in center of box
+        fallback_font = get_font(60, True)
+        draw.text((360, 280), "NEWS UPDATE", fill=(150, 200, 220), font=fallback_font)
 
-    # ---- 2) Bottom overlay bar ----
+    # 4. Text Overlay Background
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
-    bar_h = 430
-    odraw.rectangle([0, H - bar_h, W, H], fill=(13, 56, 74, 245))
+    # Dark area for text
+    odraw.rectangle([0, 600, W, H], fill=(13, 17, 23, 255))
     img.paste(overlay, (0, 0), overlay)
 
-    # ---- 3) Text helpers ----
-    def wrap_text_to_width(text, font, max_width):
-        words = text.split()
+    # 5. Helper: Wrap Text
+    def wrap_text(text, font, max_width):
         lines = []
+        words = text.split()
         current = []
         for word in words:
             test = " ".join(current + [word])
-            w = draw.textbbox((0, 0), test, font=font)[2]
-            if w <= max_width:
+            bbox = draw.textbbox((0, 0), test, font=font)
+            if bbox[2] <= max_width:
                 current.append(word)
             else:
-                if current:
-                    lines.append(" ".join(current))
+                lines.append(" ".join(current))
                 current = [word]
-        if current:
-            lines.append(" ".join(current))
+        if current: lines.append(" ".join(current))
         return lines
 
-    def draw_text_auto(text, x, y, max_width, max_height, start_size, bold=True, line_gap=12):
-        """
-        Auto-scales font down until text fits inside max_height.
-        Returns final y position after drawing.
-        """
-        size = start_size
-        while size >= 18:
-            font = get_font(size, bold)
-            lines = wrap_text_to_width(text, font, max_width)
-            total_h = len(lines) * (size + line_gap)
+    # 6. Headline (Auto-Scaling)
+    headline = (headline or "BREAKING").upper().strip()
+    y_text = 630
+    font_size = 65
+    
+    # Shrink font until it fits
+    while True:
+        font = get_font(font_size, True)
+        lines = wrap_text(headline, font, 980)
+        if len(lines) <= 2 or font_size < 35:
+            break
+        font_size -= 5
 
-            if total_h <= max_height:
-                # draw
-                for line in lines:
-                    draw.text((x, y), line, fill=(255, 255, 255), font=font)
-                    y += (size + line_gap)
-                return y
+    for line in lines[:3]:
+        draw.text((50, y_text), line, fill=(255, 215, 0), font=font) # Yellow
+        y_text += font_size + 15
 
-            size -= 2
+    # 7. Info Text
+    info_text = (info_text or "").replace("\n", " ").strip()
+    y_text += 20
+    font_body = get_font(35, False)
+    body_lines = wrap_text(info_text, font_body, 980)
 
-        # fallback draw at smallest font
-        font = get_font(18, bold)
-        lines = wrap_text_to_width(text, font, max_width)
-        for line in lines[:6]:
-            draw.text((x, y), line, fill=(255, 255, 255), font=font)
-            y += 30
-        return y
+    for line in body_lines[:5]:
+        draw.text((50, y_text), line, fill=(230, 230, 230), font=font_body)
+        y_text += 45
 
-    # ---- 4) Draw headline and info ----
-    headline = (headline or "").strip().upper()
-    info_text = (info_text or "").strip().upper()
+    # 8. Footer
+    draw.text((50, 1020), "FOLLOW @GLOBALKNOWLEDGE | INDIA", fill=(0, 200, 255), font=get_font(24, True))
 
-    y1 = draw_text_auto(
-        headline,
-        x=50,
-        y=H - 400,
-        max_width=980,
-        max_height=140,
-        start_size=68,
-        bold=True
-    )
-
-    draw_text_auto(
-        info_text,
-        x=50,
-        y=y1 + 10,
-        max_width=980,
-        max_height=240,
-        start_size=34,
-        bold=True
-    )
-
-    # ---- 5) Footer ----
-    footer = "FOLLOW @GLOBALKNOWLEDGE | INDIA"
-    draw.text((50, 1030), footer, fill=(0, 210, 255), font=get_font(24, True))
-
-    # ---- Save ----
+    # 9. Save
     save_path = os.path.join(OUTPUT_DIR, output_name)
     img.save(save_path)
     return save_path
+

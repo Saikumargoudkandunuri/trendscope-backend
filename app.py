@@ -194,225 +194,190 @@ def clean_html(raw_html):
 # 5. AI LOGIC (The RVCJ Hinglish Converter)
 # ======================================================
 
+# ======================================================
+# AI ENGINE: THE "BRAIN" (Multi-Provider Waterfall)
+# ======================================================
+
 def ai_rvcj_converter(text):
     """
-    Wirally Engine:
-    Gemini -> Groq -> DeepSeek -> Perplexity -> OpenRouter fallback
+    Tries AI providers in this specific order (Roles):
+    1. SPEED LAYER: Groq, Cerebras (Fastest)
+    2. SMART LAYER: NVIDIA, Together, Grok (xAI) (High Intelligence)
+    3. GOOGLE LAYER: Gemini (Reliable)
+    4. BACKUP LAYER: Mistral, Cohere
+    5. FINAL RESORT: OpenRouter (Aggregator)
+    """
+    import requests
+    import json
+    import re
+    import os
+    
+    # 1. Input Safety Check
+    text = (text or "").strip()
+    if not text: return _fallback_data("Breaking News Update")
 
-    RETURNS ALWAYS:
-    {
-      "headline": "...",
-      "image_info": "...",
-      "short_caption": "..."
-    }
+    # Update the prompt inside ai_rvcj_converter function
+    prompt = f"""
+    Act as a Viral News Editor.
+    Convert this text into valid JSON.
+    
+    CRITICAL: Extract the specific "search_keyword" for the image. 
+    Examples:
+    - News about Modi -> "Narendra Modi face close up"
+    - News about Space -> "James Webb Telescope deep space"
+    - News about Virus -> "Microscopic view of virus 4k"
+    
+    JSON Keys:
+    {{
+        "headline": "Max 8 words, uppercase, shocking hook",
+        "image_info": "3 short bullet points",
+        "short_caption": "1 line catchy caption",
+        "search_keyword": "The specific subject to search for image"
+    }}
+    
+    News: {text[:1500]}
     """
 
-    import os
-    import re
-    import json
-    import requests
-
-    text = (text or "").strip()
-
-    def safe_openai_style_content(resp_json):
-        try:
-            if not isinstance(resp_json, dict):
-                return None
-            choices = resp_json.get("choices", [])
-            if not choices:
-                return None
-            msg = choices[0].get("message", {})
-            return msg.get("content")
-        except Exception:
-            return None
-
-    def normalize_ai_json(raw):
-        try:
-            raw = (raw or "").strip()
-            match = re.search(r"\{.*\}", raw, re.S)
-            if match:
-                raw = match.group(0)
-
-            data = json.loads(raw)
-
-            headline = (data.get("headline") or "").strip()
-            image_info = (data.get("image_info") or "").strip()
-            short_caption = (data.get("short_caption") or "").strip()
-
-            if not headline:
-                headline = "BREAKING UPDATE"
-            if not image_info:
-                image_info = "More details soon\nStay tuned"
-            if not short_caption:
-                short_caption = headline + " 🔥"
-
-            return {
-                "headline": headline,
-                "image_info": image_info,
-                "short_caption": short_caption
-            }
-
-        except Exception:
-            # if not JSON, make best effort
-            fallback_headline = (text[:55].upper() if text else "BREAKING UPDATE")
-            return {
-                "headline": fallback_headline,
-                "image_info": (text[:160] if text else "More details soon").replace("\n", " "),
-                "short_caption": (text[:120] if text else "Trending update") + " 🔥"
-            }
-
-    if not text:
-        return {
-            "headline": "BREAKING UPDATE",
-            "image_info": "More details soon\nStay tuned",
-            "short_caption": "Breaking update 🔥"
-        }
-
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-    PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-
-    prompt = f"""
-Act as a viral news editor for Wirally / RVCJ style.
-
-Return ONLY a JSON object with EXACT keys:
-{{
-  "headline": "Shocking viral Hinglish hook (MAX 8 words)",
-  "image_info": "3 or 4 short lines of facts (each line short)",
-  "short_caption": "1-line Hinglish/Telugu hook for Instagram"
-}}
-
-News text:
-{text}
-""".strip()
-
-    # =========================
-    # 1) GEMINI
-    # =========================
-    try:
-        if GOOGLE_API_KEY:
-            from google import genai
-            client = genai.Client(api_key=GOOGLE_API_KEY)
-            res = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt
-            )
-            raw = getattr(res, "text", "") or ""
-            return normalize_ai_json(raw)
-    except Exception as e:
-        logger.warning(f"Gemini Busy, switching... ({e})")
-
-    # =========================
-    # 2) GROQ
-    # =========================
-    try:
-        if GROQ_API_KEY:
-            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-            body = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.6
-            }
-            r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=30)
-            resp = r.json() if r.content else {}
-            if r.status_code != 200 or "error" in resp:
-                raise Exception(resp)
-            raw = safe_openai_style_content(resp)
-            if not raw:
-                raise Exception("Groq missing content")
-            return normalize_ai_json(raw)
-    except Exception as e:
-        logger.warning(f"Groq Busy, switching... ({e})")
-
-    # =========================
-    # 3) DEEPSEEK
-    # =========================
-    try:
-        if DEEPSEEK_API_KEY:
-            headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-            body = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.6
-            }
-            r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=body, timeout=30)
-            resp = r.json() if r.content else {}
-            if r.status_code != 200 or "error" in resp:
-                raise Exception(resp)
-            raw = safe_openai_style_content(resp)
-            if not raw:
-                raise Exception("DeepSeek missing content")
-            return normalize_ai_json(raw)
-    except Exception as e:
-        logger.warning(f"DeepSeek Busy, switching... ({e})")
-
-    # =========================
-    # 4) PERPLEXITY
-    # =========================
-    try:
-        if PERPLEXITY_API_KEY:
-            headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-            body = {
-                "model": "sonar",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.6
-            }
-            r = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=body, timeout=30)
-            resp = r.json() if r.content else {}
-            if r.status_code != 200 or "error" in resp:
-                raise Exception(resp)
-            raw = safe_openai_style_content(resp)
-            if not raw:
-                raise Exception("Perplexity missing content")
-            return normalize_ai_json(raw)
-    except Exception as e:
-        logger.warning(f"Perplexity Busy, switching... ({e})")
-
-    # =========================
-    # 5) OPENROUTER (LAST)
-    # =========================
-    try:
-        if OPENROUTER_API_KEY:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": os.getenv("APP_PUBLIC_URL", "https://trendscope-backend-fnsu.onrender.com"),
-                "X-Title": "Trendscope Wirally Engine"
-            }
-            body = {
-                "model": "openai/gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.6
-            }
-            r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=30)
-            resp = r.json() if r.content else {}
-            if r.status_code != 200 or "error" in resp:
-                raise Exception(resp)
-            raw = safe_openai_style_content(resp)
-            if not raw:
-                raise Exception("OpenRouter missing content")
-            return normalize_ai_json(raw)
-    except Exception as e:
-        logger.error(f"All AI brains failed! ({e})")
-    # =========================
-    # FINAL fallback: NO AI
-    # =========================
-    # Double check cleaning just in case
-    clean_text = clean_html(text)
+    # ---------------------------------------------------------
+    # LAYER 1: SPEED (The "Flash" Layer)
+    # ---------------------------------------------------------
     
-    # Try to grab just the first sentence so the headline isn't cut off mid-word
-    headline_text = clean_text.split('.')[0]
-    if len(headline_text) > 55:
-        headline_text = headline_text[:50] + "..."
+    # 1. Groq (Llama 3.3 70B) - Ultra Fast
+    res = _call_openai_compat("https://api.groq.com/openai/v1", os.getenv("GROQ_API_KEY"), "llama-3.3-70b-versatile", prompt)
+    if res: return res
 
+    # 2. Cerebras (Llama 3.1 70B) - Instant
+    res = _call_openai_compat("https://api.cerebras.ai/v1", os.getenv("CEREBRAS_API_KEY"), "llama3.1-70b", prompt)
+    if res: return res
+
+    # ---------------------------------------------------------
+    # LAYER 2: INTELLIGENCE (The "Smart" Layer)
+    # ---------------------------------------------------------
+
+    # 3. NVIDIA NIM (Llama 3.1 405B) - Massive Intelligence
+    res = _call_openai_compat("https://integrate.api.nvidia.com/v1", os.getenv("NVIDIA_API_KEY"), "meta/llama-3.1-405b-instruct", prompt)
+    if res: return res
+
+    # 4. Grok (xAI) - Elon Musk's AI
+    # Uses xAI API directly if key is present
+    res = _call_openai_compat("https://api.x.ai/v1", os.getenv("XAI_API_KEY"), "grok-beta", prompt)
+    if res: return res
+
+    # 5. Together AI (Llama 3.3)
+    res = _call_openai_compat("https://api.together.xyz/v1", os.getenv("TOGETHER_API_KEY"), "meta-llama/Llama-3.3-70B-Instruct-Turbo", prompt)
+    if res: return res
+
+    # ---------------------------------------------------------
+    # LAYER 3: GOOGLE (Gemini)
+    # ---------------------------------------------------------
+
+    # 6. Gemini 2.0 Flash
+    try:
+        if os.getenv("GEMINI_API_KEY"):
+            from google import genai
+            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+            r = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return _parse_ai_json(r.text)
+    except Exception as e:
+        logger.warning(f"Gemini Skipped: {e}")
+
+    # ---------------------------------------------------------
+    # LAYER 4: BACKUP (Direct APIs)
+    # ---------------------------------------------------------
+
+    # 7. Mistral API
+    try:
+        if os.getenv("MISTRAL_API_KEY"):
+            r = requests.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {os.getenv('MISTRAL_API_KEY')}"},
+                json={"model": "mistral-small-latest", "messages": [{"role": "user", "content": prompt}]}
+            )
+            if r.status_code == 200:
+                return _parse_ai_json(r.json()["choices"][0]["message"]["content"])
+    except: pass
+
+    # 8. Cohere API
+    try:
+        if os.getenv("COHERE_API_KEY"):
+            r = requests.post(
+                "https://api.cohere.com/v1/chat",
+                headers={"Authorization": f"Bearer {os.getenv('COHERE_API_KEY')}", "Content-Type": "application/json"},
+                json={"message": prompt, "model": "command-r-plus"}
+            )
+            if r.status_code == 200:
+                return _parse_ai_json(r.json()["text"])
+    except: pass
+
+    # ---------------------------------------------------------
+    # LAYER 5: OPENROUTER (The Final Net)
+    # ---------------------------------------------------------
+
+    # 9. OpenRouter (Accesses GPT-4o, Claude 3.5, etc.)
+    # Requires OPENROUTER_API_KEY
+    res = _call_openai_compat("https://openrouter.ai/api/v1", os.getenv("OPENROUTER_API_KEY"), "openai/gpt-4o-mini", prompt)
+    if res: return res
+
+    # --- FALLBACK (If everything fails) ---
+    logger.error("❌ CRITICAL: All AI providers failed. Using manual fallback.")
+    return _fallback_data(text)
+
+
+# ======================================================
+# HELPER FUNCTIONS (Paste these below ai_rvcj_converter)
+# ======================================================
+
+def _call_openai_compat(url, key, model, prompt):
+    """
+    Universal caller for Groq, Cerebras, Nvidia, Together, xAI, OpenRouter.
+    """
+    if not key: return None
+    try:
+        headers = {
+            "Authorization": f"Bearer {key}", 
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://trendscope.app", # For OpenRouter
+            "X-Title": "TrendScope" # For OpenRouter
+        }
+        data = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.6,
+            "max_tokens": 500
+        }
+        r = requests.post(f"{url}/chat/completions", headers=headers, json=data, timeout=15)
+        
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"]
+            return _parse_ai_json(content)
+        else:
+            logger.warning(f"AI Error {url}: {r.status_code} - {r.text}")
+    except Exception as e:
+        logger.warning(f"AI Exception {url}: {e}")
+    return None
+
+def _parse_ai_json(raw):
+    """Clean and parse JSON from AI"""
+    try:
+        # Strip markdown code blocks if present
+        raw = re.sub(r"```json|```", "", raw).strip()
+        data = json.loads(raw)
+        return {
+            "headline": data.get("headline", "BREAKING UPDATE"),
+            "image_info": data.get("image_info", "Details loading..."),
+            "short_caption": data.get("short_caption", "TrendScope Update 🔥")
+        }
+    except:
+        return _fallback_data(raw)
+
+def _fallback_data(text):
+    """Manual fallback if AI fails"""
+    clean_text = text[:50].replace("\n", " ").upper()
     return {
-        "headline": headline_text.upper(),
-        "image_info": clean_text[:160].replace("\n", " "),
-        "short_caption": clean_text[:120].replace("\n", " ") + " 🔥"
+        "headline": clean_text,
+        "image_info": text[:150],
+        "short_caption": "Latest Update 🔥 #News"
     }
-
 # ======================================================
 # 6. NEWS ENGINE (Scoring & Fetching)
 # ======================================================
@@ -753,60 +718,92 @@ def post_category_wise_news():
         news_items = fetch_news(filter_posted=True)
 
         for n in news_items:
+            local_path = None # Keep track of file to delete it later
             try:
-                # ✅ STOP POSTING IF IG IS IN COOLDOWN
-                # (post_to_instagram already returns cooldown_active)
-                # We just break to avoid trying all items.
+                # ---------------------------------------------------------
+                # STEP 1: AI BRAIN (Get Content & Search Keyword)
+                # ---------------------------------------------------------
+                # We extract the summary or title to feed the AI
+                raw_text = n.get("summary", n.get("title", ""))
+                data = ai_rvcj_converter(raw_text)
                 
-                # 1) AI
-                data = ai_rvcj_converter(n.get("summary", n.get("title", "")))
+                # Extract the specialized keyword from AI (or fallback to title)
+                search_term = data.get("search_keyword", n.get("title", ""))
 
-                # 2) Unique Filename
+                # ---------------------------------------------------------
+                # STEP 2: SMART IMAGE SOURCING (RSS vs God Mode)
+                # ---------------------------------------------------------
+                from fallback_images import get_image_url
+                
+                # 1. Try to get image from RSS Feed first
+                current_image_url = n.get("image") or extract_image(n)
+                
+                # 2. Validation: If RSS image is missing, broken, or a generic placeholder...
+                # ...switch to GOD MODE SEARCH using the AI keyword.
+                if not current_image_url or "placeholder" in str(current_image_url).lower() or "http" not in str(current_image_url):
+                    logger.info(f"🔍 RSS Image missing. Searching Universe DB for: {search_term}")
+                    current_image_url = get_image_url(search_term)
+
+                # ---------------------------------------------------------
+                # STEP 3: GENERATE NEWS CARD (Save Locally)
+                # ---------------------------------------------------------
                 img_name = f"post_{uuid.uuid4().hex}.png"
-
-                # 3) Create Image
-                path = generate_news_image(
-                    headline=data.get("headline", "BREAKING"),
-                    info_text=data.get("image_info", "Details soon"),
-                    image_url=n.get("image") or extract_image(n),
+                
+                local_path = generate_news_image(
+                    headline=data.get("headline", "BREAKING NEWS"),
+                    info_text=data.get("image_info", "Details inside..."),
+                    image_url=current_image_url,
                     output_name=img_name
                 )
 
-                # 4) Upload to Cloudinary
-                public_url = upload_image_to_cloudinary(path)
+                # ---------------------------------------------------------
+                # STEP 4: UPLOAD TO CLOUDINARY
+                # ---------------------------------------------------------
+                public_url = upload_image_to_cloudinary(local_path)
+                
                 if not public_url:
-                    logger.error("Cloudinary upload failed, skipping item.")
+                    logger.error("❌ Cloudinary upload failed, skipping item.")
                     continue
 
-                # 5) Post
-                caption = data.get("short_caption") or data.get("headline") or "🔥"
+                # ---------------------------------------------------------
+                # STEP 5: POST TO INSTAGRAM
+                # ---------------------------------------------------------
+                # Use the AI generated short caption
+                caption = data.get("short_caption") or data.get("headline") or "Trending 🔥"
+                
                 ig_res = post_to_instagram(public_url, caption)
 
-                # 6) Save posted
+                # ---------------------------------------------------------
+                # STEP 6: HANDLE RESULT & SAVE TO SUPABASE
+                # ---------------------------------------------------------
                 if ig_res and "id" in ig_res:
                     mark_as_posted(n["link"])
-                    logger.info(f"✅ Posted: {n.get('title')}")
+                    logger.info(f"✅ Posted Successfully: {n.get('title')}")
                 else:
                     logger.error(f"❌ IG failed: {ig_res}")
 
-                    # ✅ If cooldown triggered → stop cycle
+                    # ✅ Critical: If IG says "Rate Limit" or "Cooldown", STOP the loop immediately.
                     if isinstance(ig_res, dict) and ig_res.get("error") == "cooldown_active":
                         logger.warning("⏳ IG cooldown active. Stop this cycle.")
                         break
 
-                # ❌ IMPORTANT: NO time.sleep(60) HERE
-                # Posting gap will be controlled globally in worker.py / limiter
-
             except Exception as item_err:
-                logger.error(f"Item error: {item_err}")
+                logger.error(f"Item processing error: {item_err}")
                 continue
+            
+            finally:
+                # ✅ CLEANUP: Remove local file to save space on Render
+                if local_path and os.path.exists(local_path):
+                    try:
+                        os.remove(local_path)
+                    except:
+                        pass
 
     except Exception as e:
-        logger.error(f"post_category_wise_news error: {e}")
+        logger.error(f"post_category_wise_news global error: {e}")
 
     finally:
         IS_POSTING_BUSY = False
-
 
 def post_cricket_news():
     global IS_POSTING_BUSY
