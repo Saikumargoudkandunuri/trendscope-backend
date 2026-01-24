@@ -91,8 +91,7 @@ async def safe_resolve_username(client, username: str, logger=None):
 async def telegram_loop(on_event=None, logger=None):
     """
     ✅ Reads Telegram messages.
-    ✅ Calls callback:
-        await on_event(text, source)
+    ✅ Calls callback: await on_event(text, source)
     """
     _log(logger, "📨 Telegram Engine Started...")
 
@@ -112,8 +111,33 @@ async def telegram_loop(on_event=None, logger=None):
                 if not entity:
                     continue
 
+                # -------------------------------------------------------
+                # 🔥 FIX: STARTUP INITIALIZATION CHECK
+                # This prevents posting old history when the server restarts
+                # -------------------------------------------------------
+                if ch not in last_ids:
+                    try:
+                        # Get the absolute latest message just to set the baseline
+                        latest_msgs = await client.get_messages(entity, limit=1)
+                        if latest_msgs:
+                            last_ids[ch] = latest_msgs[0].id
+                            _log(logger, f"✅ Initialized {ch} at ID: {latest_msgs[0].id}")
+                        else:
+                            last_ids[ch] = 0
+                    except Exception as e:
+                        _log_err(logger, f"⚠️ Init failed for {ch}: {e}")
+                    
+                    # Skip processing on the very first run for this channel
+                    continue 
+
+                # -------------------------------------------------------
+                # NORMAL PROCESSING (Only new messages)
+                # -------------------------------------------------------
                 try:
-                    async for msg in client.iter_messages(entity, limit=5):
+                    # We use min_id so we ONLY fetch messages newer than what we saw last
+                    # This is more efficient and safer than limit=5
+                    async for msg in client.iter_messages(entity, limit=5, min_id=last_ids[ch]):
+                        
                         if not msg or not msg.id:
                             continue
 
@@ -121,13 +145,9 @@ async def telegram_loop(on_event=None, logger=None):
                         if not text:
                             continue
 
-                        # ✅ prevent repeated processing of same message
-                        prev = last_ids.get(ch, 0)
-                        if msg.id <= prev:
-                            continue
-
-                        # update latest seen
-                        last_ids[ch] = msg.id
+                        # Update latest seen ID immediately to avoid duplicates in next loop
+                        if msg.id > last_ids.get(ch, 0):
+                            last_ids[ch] = msg.id
 
                         _log(logger, f"TG [{ch}] => {text[:90]}")
 
@@ -142,6 +162,7 @@ async def telegram_loop(on_event=None, logger=None):
                     _log_err(logger, f"❌ Telegram read error {ch}: {ex}")
                     continue
 
+            # Wait 20 minutes before checking again
             await asyncio.sleep(20 * 60)
 
         except Exception as e:
