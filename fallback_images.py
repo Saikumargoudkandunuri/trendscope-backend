@@ -140,8 +140,50 @@ def get_image_url(search_keyword=None):
         return f"https://image.pollinations.ai/prompt/{safe_query}?width=1080&height=620&nologo=true&seed={random.randint(1,999999)}"
 
 # Export for compatibility
-def get_fallback_image_url(source="auto"):
-    return get_image_url()
+# ... [Keep your STATIC_POOL list at the top] ...
+
+def get_fallback_image_url(source="auto") -> str:
+    """
+    Smart Image Generator.
+    - Checks if the search keyword is valid.
+    - Uses FLUX model (Better quality, fewer rate limits).
+    """
+    import random
+    import urllib.parse
+    
+    # 1. Check if 'source' is actually a search keyword passed from app.py
+    # If source is "auto" or "mixed", we treat it as generic.
+    search_keyword = source if source not in ["auto", "mixed", "picsum"] else None
+
+    # --- STRATEGY A: SPECIFIC AI SEARCH (If keyword exists) ---
+    if search_keyword and len(search_keyword) > 3:
+        # 🔥 FIX: Force "Realism" to avoid cartoons/rate limit placeholders
+        enhanced_prompt = f"editorial news photography, {search_keyword}, highly detailed, 4k, realistic texture"
+        
+        safe_query = urllib.parse.quote(enhanced_prompt)
+        seed = random.randint(1, 9999999) # Cache Buster
+        
+        # 🔥 USING FLUX MODEL (Better quality)
+        return f"https://image.pollinations.ai/prompt/{safe_query}?width=1080&height=620&model=flux&nologo=true&seed={seed}"
+
+    # --- STRATEGY B: RANDOM FALLBACK (If no keyword) ---
+    choice = random.randint(1, 10)
+    
+    if choice <= 4:
+        # Generic AI Image (Crowd/City)
+        topics = ["crowded indian street market", "modern technology abstract", "breaking news studio background"]
+        topic = random.choice(topics)
+        safe_query = urllib.parse.quote(f"realistic photo of {topic}")
+        seed = random.randint(1, 999999)
+        return f"https://image.pollinations.ai/prompt/{safe_query}?width=1080&height=620&model=flux&nologo=true&seed={seed}"
+
+    elif choice <= 7:
+        # Picsum (Reliable)
+        return f"https://picsum.photos/1080/620?random={random.randint(1, 99999)}"
+
+    else:
+        # Static Pool (Safest)
+        return random.choice(STATIC_POOL)
 
 # List compatibility
 FALLBACK_IMAGES = [get_image_url() for _ in range(50)]

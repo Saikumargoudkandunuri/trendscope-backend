@@ -1,4 +1,3 @@
-# --- START OF FILE image_generator.py ---
 import os
 import requests
 from io import BytesIO
@@ -9,7 +8,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "images", "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Fonts: Auto-fallback if files missing
+# Fonts
 FONT_REGULAR_PATH = os.path.join(BASE_DIR, "fonts", "arial.ttf")
 FONT_BOLD_PATH = os.path.join(BASE_DIR, "fonts", "arialbd.ttf")
 
@@ -21,52 +20,40 @@ def get_font(font_size: int, bold: bool = False):
         return ImageFont.load_default()
 
 def generate_news_image(headline, info_text, image_url, output_name):
-    """
-    Generates a 1080x1080 social media post.
-    ✅ Feature: Draws a 'Safety Box' if the image URL fails.
-    """
     W, H = 1080, 1080
     
-    # 1. Base Canvas (Dark Blue/Grey)
+    # 1. Base Canvas
     img = Image.new("RGB", (W, H), (15, 17, 26))
     draw = ImageDraw.Draw(img)
 
-    # 2. Try to Download Image
+    # 2. Image Download & Safety Box
     image_loaded = False
-    
     if image_url and "http" in image_url:
         try:
-            # User-Agent prevents 403 Forbidden errors
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            headers = {"User-Agent": "Mozilla/5.0"}
             r = requests.get(image_url, headers=headers, timeout=10)
-            
             if r.status_code == 200:
                 photo = Image.open(BytesIO(r.content)).convert("RGB")
-                # Resize/Crop to fit top half
                 photo = photo.resize((W, 620), Image.Resampling.LANCZOS)
                 img.paste(photo, (0, 0))
                 image_loaded = True
         except Exception as e:
             print(f"⚠️ Image Error: {e}")
 
-    # 3. SAFETY BOX (If image failed)
+    # Safety Box if image failed
     if not image_loaded:
-        # Draw placeholder rectangle
         draw.rectangle([0, 0, W, 620], fill=(30, 35, 50))
         draw.rectangle([20, 20, W-20, 600], outline=(0, 200, 255), width=4)
-        
-        # Draw "BREAKING NEWS" in center of box
         fallback_font = get_font(60, True)
         draw.text((360, 280), "NEWS UPDATE", fill=(150, 200, 220), font=fallback_font)
 
-    # 4. Text Overlay Background
+    # 3. Text Overlay
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
-    # Dark area for text
     odraw.rectangle([0, 600, W, H], fill=(13, 17, 23, 255))
     img.paste(overlay, (0, 0), overlay)
 
-    # 5. Helper: Wrap Text
+    # 4. Helper: Wrap Text
     def wrap_text(text, font, max_width):
         lines = []
         words = text.split()
@@ -82,12 +69,28 @@ def generate_news_image(headline, info_text, image_url, output_name):
         if current: lines.append(" ".join(current))
         return lines
 
-    # 6. Headline (Auto-Scaling)
-    headline = (headline or "BREAKING").upper().strip()
+    # ======================================================
+    # 🔥 STEP 5: PASTE YOUR CLEANING LOGIC HERE 🔥
+    # ======================================================
+    
+    # Clean the Info Text (Remove JSON artifacts if any slipped through)
+    if isinstance(info_text, list):
+        info_text = "\n".join(info_text) # Convert list to string
+    
+    # Remove quotes, brackets that might break the look
+    info_text = (info_text or "").replace('"', '').replace('{', '').replace('}', '').strip()
+    
+    # Clean Headline
+    headline = (headline or "BREAKING NEWS").replace('"', '').strip().upper()
+
+    # ======================================================
+    # END CLEANING LOGIC - DRAWING STARTS BELOW
+    # ======================================================
+
+    # 6. Draw Headline
     y_text = 630
     font_size = 65
     
-    # Shrink font until it fits
     while True:
         font = get_font(font_size, True)
         lines = wrap_text(headline, font, 980)
@@ -96,11 +99,10 @@ def generate_news_image(headline, info_text, image_url, output_name):
         font_size -= 5
 
     for line in lines[:3]:
-        draw.text((50, y_text), line, fill=(255, 215, 0), font=font) # Yellow
+        draw.text((50, y_text), line, fill=(255, 215, 0), font=font)
         y_text += font_size + 15
 
-    # 7. Info Text
-    info_text = (info_text or "").replace("\n", " ").strip()
+    # 7. Draw Info Text
     y_text += 20
     font_body = get_font(35, False)
     body_lines = wrap_text(info_text, font_body, 980)
@@ -110,10 +112,9 @@ def generate_news_image(headline, info_text, image_url, output_name):
         y_text += 45
 
     # 8. Footer
-    draw.text((50, 1020), "FOLLOW @GLOBALKNOWLEDGE | INDIA", fill=(0, 200, 255), font=get_font(24, True))
+    draw.text((50, 1020), "TRENDSCOPE • LIVE", fill=(0, 200, 255), font=get_font(24, True))
 
     # 9. Save
     save_path = os.path.join(OUTPUT_DIR, output_name)
     img.save(save_path)
     return save_path
-

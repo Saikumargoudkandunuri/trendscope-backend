@@ -198,6 +198,10 @@ def clean_html(raw_html):
 # AI ENGINE: THE "BRAIN" (Multi-Provider Waterfall)
 # ======================================================
 
+# ======================================================
+# AI ENGINE: MULTI-PROVIDER WATERFALL (Strict Mode)
+# ======================================================
+
 def ai_rvcj_converter(text):
     """
     Tries AI providers in this specific order (Roles):
@@ -216,55 +220,52 @@ def ai_rvcj_converter(text):
     text = (text or "").strip()
     if not text: return _fallback_data("Breaking News Update")
 
-    # Update the prompt inside ai_rvcj_converter function
+    # 2. THE PROMPT (Optimized for JSON & Image Keywords)
     prompt = f"""
     Act as a Viral News Editor.
-    Convert this text into valid JSON.
+    Convert this news into a valid JSON object.
     
-    CRITICAL: Extract the specific "search_keyword" for the image. 
-    Examples:
-    - News about Modi -> "Narendra Modi face close up"
-    - News about Space -> "James Webb Telescope deep space"
-    - News about Virus -> "Microscopic view of virus 4k"
+    CRITICAL INSTRUCTIONS:
+    1. "headline": Max 8 words, uppercase, shocking/exciting hook.
+    2. "image_info": 3 bullet points (facts only, max 10 words each).
+    3. "short_caption": Catchy caption with 3-4 hashtags.
+    4. "search_keyword": THE VISUAL SUBJECT for image generation.
+       - If it's a person: "Portrait of [Name] face high quality"
+       - If it's sports: "[Sport Name] action shot realistic"
+       - If generic: "Cinematic view of [Topic]"
+       - NEVER use metaphors like "Shining Star", use the literal name.
     
-    JSON Keys:
-    {{
-        "headline": "Max 8 words, uppercase, shocking hook",
-        "image_info": "3 short bullet points",
-        "short_caption": "1 line catchy caption",
-        "search_keyword": "The specific subject to search for image"
-    }}
+    Input News: {text[:1500]}
     
-    News: {text[:1500]}
+    Output format: JSON ONLY. Do not write "Here is the JSON" or markdown.
     """
 
     # ---------------------------------------------------------
     # LAYER 1: SPEED (The "Flash" Layer)
     # ---------------------------------------------------------
     
-    # 1. Groq (Llama 3.3 70B) - Ultra Fast
-    res = _call_openai_compat("https://api.groq.com/openai/v1", os.getenv("GROQ_API_KEY"), "llama-3.3-70b-versatile", prompt)
+    # 1. Groq (Llama 3.3 70B)
+    res = _call_openai_compat("Groq", "https://api.groq.com/openai/v1", os.getenv("GROQ_API_KEY"), "llama-3.3-70b-versatile", prompt)
     if res: return res
 
-    # 2. Cerebras (Llama 3.1 70B) - Instant
-    res = _call_openai_compat("https://api.cerebras.ai/v1", os.getenv("CEREBRAS_API_KEY"), "llama3.1-70b", prompt)
+    # 2. Cerebras (Llama 3.1 70B)
+    res = _call_openai_compat("Cerebras", "https://api.cerebras.ai/v1", os.getenv("CEREBRAS_API_KEY"), "llama3.1-70b", prompt)
     if res: return res
 
     # ---------------------------------------------------------
     # LAYER 2: INTELLIGENCE (The "Smart" Layer)
     # ---------------------------------------------------------
 
-    # 3. NVIDIA NIM (Llama 3.1 405B) - Massive Intelligence
-    res = _call_openai_compat("https://integrate.api.nvidia.com/v1", os.getenv("NVIDIA_API_KEY"), "meta/llama-3.1-405b-instruct", prompt)
+    # 3. NVIDIA NIM (Llama 3.1 405B)
+    res = _call_openai_compat("Nvidia", "https://integrate.api.nvidia.com/v1", os.getenv("NVIDIA_API_KEY"), "meta/llama-3.1-405b-instruct", prompt)
     if res: return res
 
-    # 4. Grok (xAI) - Elon Musk's AI
-    # Uses xAI API directly if key is present
-    res = _call_openai_compat("https://api.x.ai/v1", os.getenv("XAI_API_KEY"), "grok-beta", prompt)
+    # 4. Grok (xAI)
+    res = _call_openai_compat("Grok", "https://api.x.ai/v1", os.getenv("XAI_API_KEY"), "grok-beta", prompt)
     if res: return res
 
     # 5. Together AI (Llama 3.3)
-    res = _call_openai_compat("https://api.together.xyz/v1", os.getenv("TOGETHER_API_KEY"), "meta-llama/Llama-3.3-70B-Instruct-Turbo", prompt)
+    res = _call_openai_compat("Together", "https://api.together.xyz/v1", os.getenv("TOGETHER_API_KEY"), "meta-llama/Llama-3.3-70B-Instruct-Turbo", prompt)
     if res: return res
 
     # ---------------------------------------------------------
@@ -277,25 +278,18 @@ def ai_rvcj_converter(text):
             from google import genai
             client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
             r = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            logger.info("🧠 AI WINNER: Gemini 2.0 Flash")
             return _parse_ai_json(r.text)
     except Exception as e:
-        logger.warning(f"Gemini Skipped: {e}")
+        logger.warning(f"⚠️ Gemini Skipped: {e}")
 
     # ---------------------------------------------------------
     # LAYER 4: BACKUP (Direct APIs)
     # ---------------------------------------------------------
 
     # 7. Mistral API
-    try:
-        if os.getenv("MISTRAL_API_KEY"):
-            r = requests.post(
-                "https://api.mistral.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {os.getenv('MISTRAL_API_KEY')}"},
-                json={"model": "mistral-small-latest", "messages": [{"role": "user", "content": prompt}]}
-            )
-            if r.status_code == 200:
-                return _parse_ai_json(r.json()["choices"][0]["message"]["content"])
-    except: pass
+    if _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt):
+        return _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt)
 
     # 8. Cohere API
     try:
@@ -306,6 +300,7 @@ def ai_rvcj_converter(text):
                 json={"message": prompt, "model": "command-r-plus"}
             )
             if r.status_code == 200:
+                logger.info("🧠 AI WINNER: Cohere")
                 return _parse_ai_json(r.json()["text"])
     except: pass
 
@@ -313,14 +308,86 @@ def ai_rvcj_converter(text):
     # LAYER 5: OPENROUTER (The Final Net)
     # ---------------------------------------------------------
 
-    # 9. OpenRouter (Accesses GPT-4o, Claude 3.5, etc.)
-    # Requires OPENROUTER_API_KEY
-    res = _call_openai_compat("https://openrouter.ai/api/v1", os.getenv("OPENROUTER_API_KEY"), "openai/gpt-4o-mini", prompt)
+    # 9. OpenRouter
+    res = _call_openai_compat("OpenRouter", "https://openrouter.ai/api/v1", os.getenv("OPENROUTER_API_KEY"), "openai/gpt-4o-mini", prompt)
     if res: return res
 
     # --- FALLBACK (If everything fails) ---
     logger.error("❌ CRITICAL: All AI providers failed. Using manual fallback.")
     return _fallback_data(text)
+
+
+# ======================================================
+# HELPER FUNCTIONS (Must be below the main function)
+# ======================================================
+
+def _call_openai_compat(provider_name, url, key, model, prompt):
+    """
+    Generic caller for OpenAI-compatible APIs.
+    Logs the provider name on success.
+    """
+    if not key: return None
+    try:
+        headers = {
+            "Authorization": f"Bearer {key}", 
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://trendscope.app", # For OpenRouter
+            "X-Title": "TrendScope" # For OpenRouter
+        }
+        data = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.5,
+            "max_tokens": 500
+        }
+        r = requests.post(f"{url}/chat/completions", headers=headers, json=data, timeout=15)
+        
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"]
+            logger.info(f"🧠 AI WINNER: {provider_name}") # <--- Logs the specific winner
+            return _parse_ai_json(content)
+        else:
+            logger.warning(f"⚠️ {provider_name} Error: {r.status_code}")
+    except Exception as e:
+        logger.warning(f"⚠️ {provider_name} Exception: {e}")
+    return None
+
+def _parse_ai_json(raw):
+    """
+    Strict JSON cleaner to remove 'Here is the JSON' garbage.
+    """
+    try:
+        # Find the first '{' and last '}'
+        start = raw.find('{')
+        end = raw.rfind('}')
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
+
+        data = json.loads(raw)
+        
+        # Ensure 'search_keyword' exists
+        if "search_keyword" not in data:
+            data["search_keyword"] = "" 
+            
+        return {
+            "headline": data.get("headline", "BREAKING UPDATE"),
+            "image_info": data.get("image_info", "Details loading..."),
+            "short_caption": data.get("short_caption", "TrendScope Update #News 🔥"),
+            "search_keyword": data.get("search_keyword", "")
+        }
+    except Exception as e:
+        logger.error(f"JSON Parse Error: {e}")
+        return _fallback_data(raw)
+
+def _fallback_data(text):
+    """Manual fallback"""
+    clean_text = text[:50].replace("\n", " ").upper()
+    return {
+        "headline": clean_text,
+        "image_info": text[:150],
+        "short_caption": "Latest Update 🔥 #News",
+        "search_keyword": clean_text # Try searching the title as a last resort
+    }
 
 
 # ======================================================
