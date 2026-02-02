@@ -202,6 +202,10 @@ def clean_html(raw_html):
 # AI ENGINE: MULTI-PROVIDER WATERFALL (Strict Mode)
 # ======================================================
 
+# ======================================================
+# AI ENGINE: MULTI-PROVIDER WATERFALL (Storyteller Mode)
+# ======================================================
+
 def ai_rvcj_converter(text):
     """
     Tries AI providers in this specific order (Roles):
@@ -220,24 +224,35 @@ def ai_rvcj_converter(text):
     text = (text or "").strip()
     if not text: return _fallback_data("Breaking News Update")
 
-    # 2. THE PROMPT (Optimized for JSON & Image Keywords)
+    # 2. THE PROMPT (Optimized for Storytelling & Visuals)
     prompt = f"""
-    Act as a Viral News Editor.
-    Convert this news into a valid JSON object.
+    Act as a Senior Editor for a viral Instagram News Page (like RVCJ Media or Tatva India).
     
-    CRITICAL INSTRUCTIONS:
-    1. "headline": Max 8 words, uppercase, shocking/exciting hook.
-    2. "image_info": 3 bullet points (facts only, max 10 words each).
-    3. "short_caption": Catchy caption with 3-4 hashtags.
-    4. "search_keyword": THE VISUAL SUBJECT for image generation.
-       - If it's a person: "Portrait of [Name] face high quality"
-       - If it's sports: "[Sport Name] action shot realistic"
-       - If generic: "Cinematic view of [Topic]"
-       - NEVER use metaphors like "Shining Star", use the literal name.
+    TASK: Read the news below and convert it into a valid JSON object.
     
-    Input News: {text[:1500]}
+    RULES FOR "image_info" (The Text Body):
+    1. Do NOT use bullet points. 
+    2. Write a short paragraph (2-3 sentences max).
+    3. Explain the context: What happened? Why is it important?
+    4. Use simple, conversational English (or Hinglish style).
+    5. NO generic keywords. Write full, engaging sentences.
     
-    Output format: JSON ONLY. Do not write "Here is the JSON" or markdown.
+    RULES FOR "search_keyword" (The Image Subject):
+    1. Extract the MAIN VISUAL SUBJECT. 
+    2. If it's a person, output: "Portrait of [Name] face realistic"
+    3. If it's a match, output: "[Team A] vs [Team B] cricket match"
+    4. NEVER use metaphors (e.g., DO NOT say "Shining Star", say the person's real name).
+    5. Keep it under 6 words.
+    
+    Input News: {text[:2000]}
+    
+    Output JSON format:
+    {{
+        "headline": "Short punchy headline (Max 7 words, Uppercase)",
+        "image_info": "The 2-3 sentence summary here...",
+        "short_caption": "Engaging caption for Instagram #Hashtags",
+        "search_keyword": "Exact visual subject for AI image generator"
+    }}
     """
 
     # ---------------------------------------------------------
@@ -288,8 +303,8 @@ def ai_rvcj_converter(text):
     # ---------------------------------------------------------
 
     # 7. Mistral API
-    if _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt):
-        return _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt)
+    if _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt) is not None:
+         return _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt)
 
     # 8. Cohere API
     try:
@@ -806,14 +821,29 @@ def post_category_wise_news():
                 search_term = data.get("search_keyword", n.get("title", ""))
 
                 # ---------------------------------------------------------
-                # STEP 2: SMART IMAGE SOURCING (RSS vs God Mode)
+                # STEP 2: SMART IMAGE SOURCING (Aggressive Mode)
                 # ---------------------------------------------------------
                 from fallback_images import get_image_url
                 
-                current_image_url = n.get("image") or extract_image(n)
+                # 1. Get RSS Image
+                rss_image = n.get("image") or extract_image(n)
+                current_image_url = rss_image
                 
-                if not current_image_url or "placeholder" in str(current_image_url).lower() or "http" not in str(current_image_url):
-                    logger.info(f"🔍 RSS Image missing. Searching Universe DB for: {search_term}")
+                # 2. DECISION LOGIC: When to use AI Search?
+                # We force search if:
+                # - No RSS image
+                # - RSS image is a tiny pixel/placeholder
+                # - RSS image is not a proper URL
+                # - OR randomly 30% of the time to get fresh AI images instead of boring stock photos
+                
+                should_search = False
+                if not rss_image or "http" not in str(rss_image):
+                    should_search = True
+                elif "placeholder" in str(rss_image).lower() or "feedburner" in str(rss_image).lower():
+                    should_search = True
+                
+                if should_search:
+                    logger.info(f"🔍 RSS Image bad. Generating AI Image for: {search_term}")
                     current_image_url = get_image_url(search_term)
 
                 # ---------------------------------------------------------

@@ -142,48 +142,131 @@ def get_image_url(search_keyword=None):
 # Export for compatibility
 # ... [Keep your STATIC_POOL list at the top] ...
 
-def get_fallback_image_url(source="auto") -> str:
+# ======================================================
+# AI ENGINE: MULTI-PROVIDER WATERFALL (Storyteller Mode)
+# ======================================================
+
+def ai_rvcj_converter(text):
     """
-    Smart Image Generator.
-    - Checks if the search keyword is valid.
-    - Uses FLUX model (Better quality, fewer rate limits).
+    Tries AI providers in this specific order (Roles):
+    1. SPEED LAYER: Groq, Cerebras (Fastest)
+    2. SMART LAYER: NVIDIA, Together, Grok (xAI) (High Intelligence)
+    3. GOOGLE LAYER: Gemini (Reliable)
+    4. BACKUP LAYER: Mistral, Cohere
+    5. FINAL RESORT: OpenRouter (Aggregator)
     """
-    import random
-    import urllib.parse
+    import requests
+    import json
+    import re
+    import os
     
-    # 1. Check if 'source' is actually a search keyword passed from app.py
-    # If source is "auto" or "mixed", we treat it as generic.
-    search_keyword = source if source not in ["auto", "mixed", "picsum"] else None
+    # 1. Input Safety Check
+    text = (text or "").strip()
+    if not text: return _fallback_data("Breaking News Update")
 
-    # --- STRATEGY A: SPECIFIC AI SEARCH (If keyword exists) ---
-    if search_keyword and len(search_keyword) > 3:
-        # 🔥 FIX: Force "Realism" to avoid cartoons/rate limit placeholders
-        enhanced_prompt = f"editorial news photography, {search_keyword}, highly detailed, 4k, realistic texture"
-        
-        safe_query = urllib.parse.quote(enhanced_prompt)
-        seed = random.randint(1, 9999999) # Cache Buster
-        
-        # 🔥 USING FLUX MODEL (Better quality)
-        return f"https://image.pollinations.ai/prompt/{safe_query}?width=1080&height=620&model=flux&nologo=true&seed={seed}"
-
-    # --- STRATEGY B: RANDOM FALLBACK (If no keyword) ---
-    choice = random.randint(1, 10)
+    # 2. THE PROMPT (Optimized for Storytelling & Visuals)
+    prompt = f"""
+    Act as a Senior Editor for a viral Instagram News Page (like RVCJ Media or Tatva India).
     
-    if choice <= 4:
-        # Generic AI Image (Crowd/City)
-        topics = ["crowded indian street market", "modern technology abstract", "breaking news studio background"]
-        topic = random.choice(topics)
-        safe_query = urllib.parse.quote(f"realistic photo of {topic}")
-        seed = random.randint(1, 999999)
-        return f"https://image.pollinations.ai/prompt/{safe_query}?width=1080&height=620&model=flux&nologo=true&seed={seed}"
+    TASK: Read the news below and convert it into a valid JSON object.
+    
+    RULES FOR "image_info" (The Text Body):
+    1. Do NOT use bullet points. 
+    2. Write a short paragraph (2-3 sentences max).
+    3. Explain the context: What happened? Why is it important?
+    4. Use simple, conversational English (or Hinglish style).
+    5. NO generic keywords. Write full, engaging sentences.
+    
+    RULES FOR "search_keyword" (The Image Subject):
+    1. Extract the MAIN VISUAL SUBJECT. 
+    2. If it's a person, output: "Portrait of [Name] face realistic"
+    3. If it's a match, output: "[Team A] vs [Team B] cricket match"
+    4. NEVER use metaphors (e.g., DO NOT say "Shining Star", say the person's real name).
+    5. Keep it under 6 words.
+    
+    Input News: {text[:2000]}
+    
+    Output JSON format:
+    {{
+        "headline": "Short punchy headline (Max 7 words, Uppercase)",
+        "image_info": "The 2-3 sentence summary here...",
+        "short_caption": "Engaging caption for Instagram #Hashtags",
+        "search_keyword": "Exact visual subject for AI image generator"
+    }}
+    """
 
-    elif choice <= 7:
-        # Picsum (Reliable)
-        return f"https://picsum.photos/1080/620?random={random.randint(1, 99999)}"
+    # ---------------------------------------------------------
+    # LAYER 1: SPEED (The "Flash" Layer)
+    # ---------------------------------------------------------
+    
+    # 1. Groq (Llama 3.3 70B)
+    res = _call_openai_compat("Groq", "https://api.groq.com/openai/v1", os.getenv("GROQ_API_KEY"), "llama-3.3-70b-versatile", prompt)
+    if res: return res
 
-    else:
-        # Static Pool (Safest)
-        return random.choice(STATIC_POOL)
+    # 2. Cerebras (Llama 3.1 70B)
+    res = _call_openai_compat("Cerebras", "https://api.cerebras.ai/v1", os.getenv("CEREBRAS_API_KEY"), "llama3.1-70b", prompt)
+    if res: return res
 
-# List compatibility
-FALLBACK_IMAGES = [get_image_url() for _ in range(50)]
+    # ---------------------------------------------------------
+    # LAYER 2: INTELLIGENCE (The "Smart" Layer)
+    # ---------------------------------------------------------
+
+    # 3. NVIDIA NIM (Llama 3.1 405B)
+    res = _call_openai_compat("Nvidia", "https://integrate.api.nvidia.com/v1", os.getenv("NVIDIA_API_KEY"), "meta/llama-3.1-405b-instruct", prompt)
+    if res: return res
+
+    # 4. Grok (xAI)
+    res = _call_openai_compat("Grok", "https://api.x.ai/v1", os.getenv("XAI_API_KEY"), "grok-beta", prompt)
+    if res: return res
+
+    # 5. Together AI (Llama 3.3)
+    res = _call_openai_compat("Together", "https://api.together.xyz/v1", os.getenv("TOGETHER_API_KEY"), "meta-llama/Llama-3.3-70B-Instruct-Turbo", prompt)
+    if res: return res
+
+    # ---------------------------------------------------------
+    # LAYER 3: GOOGLE (Gemini)
+    # ---------------------------------------------------------
+
+    # 6. Gemini 2.0 Flash
+    try:
+        if os.getenv("GEMINI_API_KEY"):
+            from google import genai
+            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+            r = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            logger.info("🧠 AI WINNER: Gemini 2.0 Flash")
+            return _parse_ai_json(r.text)
+    except Exception as e:
+        logger.warning(f"⚠️ Gemini Skipped: {e}")
+
+    # ---------------------------------------------------------
+    # LAYER 4: BACKUP (Direct APIs)
+    # ---------------------------------------------------------
+
+    # 7. Mistral API
+    if _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt) is not None:
+         return _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt)
+
+    # 8. Cohere API
+    try:
+        if os.getenv("COHERE_API_KEY"):
+            r = requests.post(
+                "https://api.cohere.com/v1/chat",
+                headers={"Authorization": f"Bearer {os.getenv('COHERE_API_KEY')}", "Content-Type": "application/json"},
+                json={"message": prompt, "model": "command-r-plus"}
+            )
+            if r.status_code == 200:
+                logger.info("🧠 AI WINNER: Cohere")
+                return _parse_ai_json(r.json()["text"])
+    except: pass
+
+    # ---------------------------------------------------------
+    # LAYER 5: OPENROUTER (The Final Net)
+    # ---------------------------------------------------------
+
+    # 9. OpenRouter
+    res = _call_openai_compat("OpenRouter", "https://openrouter.ai/api/v1", os.getenv("OPENROUTER_API_KEY"), "openai/gpt-4o-mini", prompt)
+    if res: return res
+
+    # --- FALLBACK (If everything fails) ---
+    logger.error("❌ CRITICAL: All AI providers failed. Using manual fallback.")
+    return _fallback_data(text)
