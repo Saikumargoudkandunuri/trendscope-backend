@@ -20,6 +20,10 @@ def get_font(font_size: int, bold: bool = False):
         return ImageFont.load_default()
 
 def generate_news_image(headline, info_text, image_url, output_name):
+    """
+    Generates a 1080x1080 social media post.
+    ✅ UPDATED: Includes 'Text Sanitizer' to remove AI chat garbage.
+    """
     W, H = 1080, 1080
     
     # 1. Base Canvas
@@ -47,7 +51,7 @@ def generate_news_image(headline, info_text, image_url, output_name):
         fallback_font = get_font(60, True)
         draw.text((360, 280), "NEWS UPDATE", fill=(150, 200, 220), font=fallback_font)
 
-    # 3. Text Overlay
+    # 3. Text Overlay Background
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
     odraw.rectangle([0, 600, W, H], fill=(13, 17, 23, 255))
@@ -70,27 +74,43 @@ def generate_news_image(headline, info_text, image_url, output_name):
         return lines
 
     # ======================================================
-    # 🔥 STEP 5: PASTE YOUR CLEANING LOGIC HERE 🔥
+    # 🔥 STEP 5: TEXT SANITIZER (The Fix) 🔥
     # ======================================================
     
-    # Clean the Info Text (Remove JSON artifacts if any slipped through)
+    # A. Clean Info Text (Handle Lists)
     if isinstance(info_text, list):
-        info_text = "\n".join(info_text) # Convert list to string
+        info_text = "\n".join(info_text)
     
-    # Remove quotes, brackets that might break the look
-    info_text = (info_text or "").replace('"', '').replace('{', '').replace('}', '').strip()
+    info_text = str(info_text).strip()
+
+    # B. Detect & Remove AI Garbage ("Here is the JSON...")
+    # If the text contains these specific AI phrases, we wipe it and use a safe default.
+    forbidden_phrases = ["here is the", "json object", "json format", "output:", "based on the", "given news"]
     
-    # Clean Headline
-    headline = (headline or "BREAKING NEWS").replace('"', '').strip().upper()
+    if any(phrase in info_text.lower() for phrase in forbidden_phrases):
+        print(f"⚠️ Detected Garbage Text: '{info_text[:30]}...' -> Replaced with safe default.")
+        info_text = "Details regarding this developing story are being updated.\nStay tuned for official reports."
+
+    # C. Clean Headline
+    headline = str(headline).strip().upper()
+    
+    # If headline is suspiciously long or contains JSON syntax, reset it
+    if len(headline) > 100 or "JSON" in headline or "HERE" in headline or "{" in headline:
+        headline = "BREAKING NEWS"
+
+    # D. Remove artifacts (Quotes, brackets)
+    headline = headline.replace('"', '').replace("'", "")
+    info_text = info_text.replace('"', '').replace('{', '').replace('}', '').replace("'", "")
 
     # ======================================================
     # END CLEANING LOGIC - DRAWING STARTS BELOW
     # ======================================================
 
-    # 6. Draw Headline
+    # 6. Draw Headline (Auto-Scaling)
     y_text = 630
     font_size = 65
     
+    # Shrink font if headline is too long
     while True:
         font = get_font(font_size, True)
         lines = wrap_text(headline, font, 980)
@@ -99,7 +119,7 @@ def generate_news_image(headline, info_text, image_url, output_name):
         font_size -= 5
 
     for line in lines[:3]:
-        draw.text((50, y_text), line, fill=(255, 215, 0), font=font)
+        draw.text((50, y_text), line, fill=(255, 215, 0), font=font) # Yellow Headline
         y_text += font_size + 15
 
     # 7. Draw Info Text
@@ -112,7 +132,7 @@ def generate_news_image(headline, info_text, image_url, output_name):
         y_text += 45
 
     # 8. Footer
-    draw.text((50, 1020), "TRENDSCOPE • LIVE", fill=(0, 200, 255), font=get_font(24, True))
+    draw.text((50, 1020), "GLOBALKNOWLEDGE •YOUTUBE •INSTAGRAM", fill=(0, 200, 255), font=get_font(24, True))
 
     # 9. Save
     save_path = os.path.join(OUTPUT_DIR, output_name)

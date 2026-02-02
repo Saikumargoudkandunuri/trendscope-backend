@@ -228,8 +228,18 @@ def ai_rvcj_converter(text):
     text = (text or "").strip()
     if not text: return _fallback_data("Breaking News Update")
 
-    # 2. THE PROMPT (Optimized for Storytelling & Visuals)
+    # 2. THE PROMPT (Strict "No Talk" Mode)
     prompt = f"""
+    Act as a Viral News Editor.
+    Task: Convert the news below into a valid JSON object.
+    
+    CRITICAL RULES:
+    1. Output JSON ONLY. Start with {{ and end with }}.
+    2. DO NOT write "Here is the JSON" or "Sure".
+    3. "headline": Max 7 words, uppercase, shocking hook.
+    4. "image_info": 2-3 short conversational sentences.
+    5. "search_keyword": The visual subject (e.g., "Narendra Modi face").
+    
     Act as a Senior Editor for a viral Instagram News Page (like RVCJ Media or Tatva India).
     
     TASK: Read the news below and convert it into a valid JSON object.
@@ -247,6 +257,7 @@ def ai_rvcj_converter(text):
     3. If it's a match, output: "[Team A] vs [Team B] cricket match"
     4. NEVER use metaphors (e.g., DO NOT say "Shining Star", say the person's real name).
     5. Keep it under 6 words.
+    
     
     Input News: {text[:2000]}
     
@@ -372,42 +383,45 @@ def _call_openai_compat(provider_name, url, key, model, prompt):
 
 def _parse_ai_json(raw):
     """
-    Strict JSON cleaner to remove 'Here is the JSON' garbage.
+    ✅ FIXED: Aggressively finds valid JSON { } and ignores 'Here is the JSON...' text.
     """
-    try:
-        # Find the first '{' and last '}'
-        start = raw.find('{')
-        end = raw.rfind('}')
-        if start != -1 and end != -1:
-            raw = raw[start:end+1]
+    import json
+    import re
 
-        data = json.loads(raw)
-        
-        # Ensure 'search_keyword' exists
-        if "search_keyword" not in data:
-            data["search_keyword"] = "" 
-            
+    try:
+        # 1. Regex to find the first JSON object enclosed in braces
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            data = json.loads(clean_json)
+        else:
+            raise ValueError("No JSON brackets found")
+
+        # 2. Validate Keys
         return {
-            "headline": data.get("headline", "BREAKING UPDATE"),
-            "image_info": data.get("image_info", "Details loading..."),
+            "headline": data.get("headline", "BREAKING NEWS").upper(),
+            "image_info": data.get("image_info", "Details coming soon..."),
             "short_caption": data.get("short_caption", "TrendScope Update #News 🔥"),
             "search_keyword": data.get("search_keyword", "")
         }
-    except Exception as e:
-        logger.error(f"JSON Parse Error: {e}")
-        return _fallback_data(raw)
 
-def _fallback_data(text):
-    """Manual fallback"""
-    clean_text = text[:50].replace("\n", " ").upper()
+    except Exception as e:
+        logger.error(f"JSON Parse Failed: {e}. Raw text was: {raw[:50]}...")
+        # If parsing fails, DO NOT return the raw text. Return safe defaults.
+        return _fallback_data_safe()
+
+def _fallback_data_safe():
+    """
+    ✅ FIXED: Returns generic safe text instead of garbage code.
+    """
     return {
-        "headline": clean_text,
-        "image_info": text[:150],
-        "short_caption": "Latest Update 🔥 #News",
-        "search_keyword": clean_text # Try searching the title as a last resort
+        "headline": "BREAKING NEWS",
+        "image_info": "Latest updates on this developing story.\nStay tuned for more details.",
+        "short_caption": "Breaking Update 🔥 #News",
+        "search_keyword": "breaking news studio" # Ensures a safe image is found
     }
 
-
+# Note: Remove the old _fallback_data(text) function entirely.
 # ======================================================
 # HELPER FUNCTIONS (Update this function in app.py)
 # ======================================================
@@ -447,27 +461,46 @@ def _call_openai_compat(provider_name, url, key, model, prompt):
     return None
 
 def _parse_ai_json(raw):
-    """Clean and parse JSON from AI"""
-    try:
-        # Strip markdown code blocks if present
-        raw = re.sub(r"```json|```", "", raw).strip()
-        data = json.loads(raw)
-        return {
-            "headline": data.get("headline", "BREAKING UPDATE"),
-            "image_info": data.get("image_info", "Details loading..."),
-            "short_caption": data.get("short_caption", "TrendScope Update 🔥")
-        }
-    except:
-        return _fallback_data(raw)
+    """
+    ✅ FIXED: Aggressively finds valid JSON { } and ignores 'Here is the JSON...' text.
+    """
+    import json
+    import re
 
-def _fallback_data(text):
-    """Manual fallback if AI fails"""
-    clean_text = text[:50].replace("\n", " ").upper()
+    try:
+        # 1. Regex to find the first JSON object enclosed in braces
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            data = json.loads(clean_json)
+        else:
+            raise ValueError("No JSON brackets found")
+
+        # 2. Validate Keys
+        return {
+            "headline": data.get("headline", "BREAKING NEWS").upper(),
+            "image_info": data.get("image_info", "Details coming soon..."),
+            "short_caption": data.get("short_caption", "TrendScope Update #News 🔥"),
+            "search_keyword": data.get("search_keyword", "")
+        }
+
+    except Exception as e:
+        logger.error(f"JSON Parse Failed: {e}. Raw text was: {raw[:50]}...")
+        # If parsing fails, DO NOT return the raw text. Return safe defaults.
+        return _fallback_data_safe()
+
+def _fallback_data_safe():
+    """
+    ✅ FIXED: Returns generic safe text instead of garbage code.
+    """
     return {
-        "headline": clean_text,
-        "image_info": text[:150],
-        "short_caption": "Latest Update 🔥 #News"
+        "headline": "BREAKING NEWS",
+        "image_info": "Latest updates on this developing story.\nStay tuned for more details.",
+        "short_caption": "Breaking Update 🔥 #News",
+        "search_keyword": "breaking news studio" # Ensures a safe image is found
     }
+
+# Note: Remove the old _fallback_data(text) function entirely.
 # ======================================================
 # 6. NEWS ENGINE (Scoring & Fetching)
 # ======================================================
