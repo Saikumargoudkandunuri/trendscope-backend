@@ -391,36 +391,41 @@ def _fallback_data(text):
 
 
 # ======================================================
-# HELPER FUNCTIONS (Paste these below ai_rvcj_converter)
+# HELPER FUNCTIONS (Update this function in app.py)
 # ======================================================
 
-def _call_openai_compat(url, key, model, prompt):
+def _call_openai_compat(provider_name, url, key, model, prompt):
     """
-    Universal caller for Groq, Cerebras, Nvidia, Together, xAI, OpenRouter.
+    Generic caller for OpenAI-compatible APIs.
+    Now accepts 'provider_name' (5th argument) to log who won.
     """
     if not key: return None
     try:
         headers = {
             "Authorization": f"Bearer {key}", 
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://trendscope.app", # For OpenRouter
-            "X-Title": "TrendScope" # For OpenRouter
+            "HTTP-Referer": "https://trendscope.app",
+            "X-Title": "TrendScope"
         }
         data = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.6,
+            "temperature": 0.5,
             "max_tokens": 500
         }
+        # Log who we are trying
+        # logger.info(f"Trying {provider_name}...") 
+        
         r = requests.post(f"{url}/chat/completions", headers=headers, json=data, timeout=15)
         
         if r.status_code == 200:
             content = r.json()["choices"][0]["message"]["content"]
+            logger.info(f"🧠 AI WINNER: {provider_name}") # Logs the specific winner
             return _parse_ai_json(content)
         else:
-            logger.warning(f"AI Error {url}: {r.status_code} - {r.text}")
+            logger.warning(f"⚠️ {provider_name} Error: {r.status_code}")
     except Exception as e:
-        logger.warning(f"AI Exception {url}: {e}")
+        logger.warning(f"⚠️ {provider_name} Exception: {e}")
     return None
 
 def _parse_ai_json(raw):

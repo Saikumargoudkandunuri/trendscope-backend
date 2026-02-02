@@ -91,78 +91,91 @@ async def safe_resolve_username(client, username: str, logger=None):
 async def telegram_loop(on_event=None, logger=None):
     """
     ✅ Reads Telegram messages.
-    ✅ Calls callback: await on_event(text, source)
+    ✅ Checks connection status before fetching.
     """
     _log(logger, "📨 Telegram Engine Started...")
 
     client = create_client(logger)
     if client is None:
-        _log(logger, "⚠️ Telegram engine not started. Continuing without Telegram.")
+        _log(logger, "⚠️ Telegram engine not started. Missing Credentials.")
         return
 
-    await client.start()
+    # 1. Explicit Connect
+    try:
+        await client.connect()
+    except Exception as e:
+        _log_err(logger, f"❌ Telegram Connection Failed: {e}")
+        return
 
-    last_ids = {}  # channel -> last msg id (avoid duplicates)
+    # 2. Check Authorization (Crucial for Render)
+    if not await client.is_user_authorized():
+        _log_err(logger, "❌ Telegram Session Invalid or Not Logged In. Please generate a new session file locally and upload it.")
+        return
+
+    _log(logger, "✅ Telegram Connected & Authorized!")
+
+    last_ids = {}
 
     while True:
+        # Safety check: Ensure we are still connected
+        if not client.is_connected():
+            try:
+                await client.connect()
+                _log(logger, "🔄 Reconnected to Telegram")
+            except Exception as e:
+                _log_err(logger, f"❌ Reconnection failed: {e}")
+                await asyncio.sleep(60)
+                continue
+
         try:
             for ch in TELEGRAM_CHANNELS:
-                entity = await safe_resolve_username(client, ch, logger)
-                if not entity:
-                    continue
-
-                # -------------------------------------------------------
-                # 🔥 FIX: STARTUP INITIALIZATION CHECK
-                # This prevents posting old history when the server restarts
-                # -------------------------------------------------------
-                if ch not in last_ids:
-                    try:
-                        # Get the absolute latest message just to set the baseline
-                        latest_msgs = await client.get_messages(entity, limit=1)
-                        if latest_msgs:
-                            last_ids[ch] = latest_msgs[0].id
-                            _log(logger, f"✅ Initialized {ch} at ID: {latest_msgs[0].id}")
-                        else:
-                            last_ids[ch] = 0
-                    except Exception as e:
-                        _log_err(logger, f"⚠️ Init failed for {ch}: {e}")
-                    
-                    # Skip processing on the very first run for this channel
-                    continue 
-
-                # -------------------------------------------------------
-                # NORMAL PROCESSING (Only new messages)
-                # -------------------------------------------------------
                 try:
-                    # We use min_id so we ONLY fetch messages newer than what we saw last
-                    # This is more efficient and safer than limit=5
+                    # Resolve Username
+                    entity = await safe_resolve_username(client, ch, logger)
+                    if not entity:
+                        continue
+
+                    # --- STARTUP CHECK (Skip old messages) ---
+                    if ch not in last_ids:
+                        try:
+                            latest_msgs = await client.get_messages(entity, limit=1)
+                            if latest_msgs:
+                                last_ids[ch] = latest_msgs[0].id
+                                # _log(logger, f"✅ Init {ch} at ID: {latest_msgs[0].id}")
+                            else:
+                                last_ids[ch] = 0
+                        except Exception as e:
+                            _log_err(logger, f"⚠️ Init failed {ch}: {e}")
+                        continue 
+
+                    # --- FETCH NEW MESSAGES ---
                     async for msg in client.iter_messages(entity, limit=5, min_id=last_ids[ch]):
-                        
-                        if not msg or not msg.id:
+                        if not msg or not msg.id or not msg.message:
                             continue
 
-                        text = (msg.message or "").strip()
+                        text = msg.message.strip()
                         if not text:
                             continue
 
-                        # Update latest seen ID immediately to avoid duplicates in next loop
+                        # Update ID
                         if msg.id > last_ids.get(ch, 0):
                             last_ids[ch] = msg.id
 
-                        _log(logger, f"TG [{ch}] => {text[:90]}")
+                        _log(logger, f"TG [{ch}] => {text[:50]}...")
 
-                        # ✅ Trigger callback to your app
+                        # Callback
                         if on_event:
                             try:
                                 await on_event(text, f"telegram:{ch}")
                             except Exception as cb_err:
                                 _log_err(logger, f"❌ TG callback error: {cb_err}")
 
-                except Exception as ex:
-                    _log_err(logger, f"❌ Telegram read error {ch}: {ex}")
+                except Exception as ch_err:
+                    # If a specific channel fails, log and continue to next
+                    # _log_err(logger, f"⚠️ Error reading {ch}: {ch_err}")
                     continue
 
-            # Wait 20 minutes before checking again
+            # Wait 20 minutes
             await asyncio.sleep(20 * 60)
 
         except Exception as e:
