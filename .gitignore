@@ -4,3 +4,6 @@ images/output/
 posted.json
 *.png
 .vscode/
+data/cities.json
+data/countries.json
+data/*.gz
