@@ -206,6 +206,10 @@ def clean_html(raw_html):
 # AI ENGINE: MULTI-PROVIDER WATERFALL (Storyteller Mode)
 # ======================================================
 
+# ======================================================
+# AI ENGINE: MULTI-PROVIDER WATERFALL (Storyteller Mode)
+# ======================================================
+
 def ai_rvcj_converter(text):
     """
     Tries AI providers in this specific order (Roles):
@@ -330,7 +334,6 @@ def ai_rvcj_converter(text):
     # --- FALLBACK (If everything fails) ---
     logger.error("❌ CRITICAL: All AI providers failed. Using manual fallback.")
     return _fallback_data(text)
-
 
 # ======================================================
 # HELPER FUNCTIONS (Must be below the main function)
