@@ -789,17 +789,20 @@ def post_category_wise_news():
 
         news_items = fetch_news(filter_posted=True)
 
+        # 🛑 CRITICAL FIX 1: Limit batch size
+        # If the bot finds 10 new items, only take the top 3.
+        # This prevents the "Machine Gun" effect that gets you banned.
+        news_items = news_items[:3]
+
         for n in news_items:
             local_path = None # Keep track of file to delete it later
             try:
                 # ---------------------------------------------------------
                 # STEP 1: AI BRAIN (Get Content & Search Keyword)
                 # ---------------------------------------------------------
-                # We extract the summary or title to feed the AI
                 raw_text = n.get("summary", n.get("title", ""))
                 data = ai_rvcj_converter(raw_text)
                 
-                # Extract the specialized keyword from AI (or fallback to title)
                 search_term = data.get("search_keyword", n.get("title", ""))
 
                 # ---------------------------------------------------------
@@ -807,11 +810,8 @@ def post_category_wise_news():
                 # ---------------------------------------------------------
                 from fallback_images import get_image_url
                 
-                # 1. Try to get image from RSS Feed first
                 current_image_url = n.get("image") or extract_image(n)
                 
-                # 2. Validation: If RSS image is missing, broken, or a generic placeholder...
-                # ...switch to GOD MODE SEARCH using the AI keyword.
                 if not current_image_url or "placeholder" in str(current_image_url).lower() or "http" not in str(current_image_url):
                     logger.info(f"🔍 RSS Image missing. Searching Universe DB for: {search_term}")
                     current_image_url = get_image_url(search_term)
@@ -840,7 +840,6 @@ def post_category_wise_news():
                 # ---------------------------------------------------------
                 # STEP 5: POST TO INSTAGRAM
                 # ---------------------------------------------------------
-                # Use the AI generated short caption
                 caption = data.get("short_caption") or data.get("headline") or "Trending 🔥"
                 
                 ig_res = post_to_instagram(public_url, caption)
@@ -851,10 +850,15 @@ def post_category_wise_news():
                 if ig_res and "id" in ig_res:
                     mark_as_posted(n["link"])
                     logger.info(f"✅ Posted Successfully: {n.get('title')}")
+                    
+                    # 🛑 CRITICAL FIX 2: Sleep 5 minutes between posts
+                    # This tells Instagram "I am a human, not a spam bot"
+                    logger.info("💤 Sleeping 5 minutes to respect Instagram limits...")
+                    time.sleep(300) 
+
                 else:
                     logger.error(f"❌ IG failed: {ig_res}")
 
-                    # ✅ Critical: If IG says "Rate Limit" or "Cooldown", STOP the loop immediately.
                     if isinstance(ig_res, dict) and ig_res.get("error") == "cooldown_active":
                         logger.warning("⏳ IG cooldown active. Stop this cycle.")
                         break
@@ -864,7 +868,7 @@ def post_category_wise_news():
                 continue
             
             finally:
-                # ✅ CLEANUP: Remove local file to save space on Render
+                # ✅ CLEANUP: Remove local file
                 if local_path and os.path.exists(local_path):
                     try:
                         os.remove(local_path)
