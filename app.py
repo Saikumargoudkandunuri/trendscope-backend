@@ -210,55 +210,99 @@ def clean_html(raw_html):
 # AI ENGINE: MULTI-PROVIDER WATERFALL (Storyteller Mode)
 # ======================================================
 
-# ======================================================
-# 5. AI LOGIC (The RVCJ Hinglish Converter)
-# ======================================================
-
 def ai_rvcj_converter(text):
     """
-    Storyteller Mode: 
-    Writes 2-3 sentence summaries and strict JSON to avoid errors.
+    Tries AI providers in this specific order (Roles):
+    1. SPEED LAYER: Groq, Cerebras (Fastest)
+    2. SMART LAYER: NVIDIA, Together, Grok (xAI) (High Intelligence)
+    3. GOOGLE LAYER: Gemini (Reliable)
+    4. BACKUP LAYER: Mistral, Cohere
+    5. FINAL RESORT: OpenRouter (Aggregator)
     """
     import requests
     import json
     import re
     import os
     
+    # 1. Input Safety Check
     text = (text or "").strip()
-    if not text: return _fallback_data_safe()
+    if not text: return _fallback_data("Breaking News Update")
 
-    # 🔥 STRICT PROMPT: No bullet points, no "Here is the JSON" text
+    # 2. THE PROMPT (Strict "No Talk" Mode)
     prompt = f"""
+    Act as a Viral News Editor.
+    Task: Convert the news below into a valid JSON object.
+    
+    CRITICAL RULES:
+    1. Output JSON ONLY. Start with {{ and end with }}.
+    2. DO NOT write "Here is the JSON" or "Sure".
+    3. "headline": Max 7 words, uppercase, shocking hook.
+    4. "image_info": 2-3 short conversational sentences.
+    5. "search_keyword": The visual subject (e.g., "Narendra Modi face").
+    
     Act as a Senior Editor for a viral Instagram News Page (like RVCJ Media or Tatva India).
     
     TASK: Read the news below and convert it into a valid JSON object.
     
-    CRITICAL RULES:
-    1. Output JSON ONLY. Start with {{ and end with }}.
-    2. DO NOT write "Here is the JSON" or any introductory text.
-    3. "headline": Short punchy headline (Max 7 words, Uppercase).
-    4. "image_info": Write a short paragraph (2-3 sentences max). Explain the context: What happened? Why is it important? Use conversational English/Hinglish. NO bullet points.
-    5. "short_caption": Engaging caption for Instagram with 3-4 hashtags.
-    6. "search_keyword": The EXACT visual subject for AI image generator. If it's a person, output: "Portrait of [Name] face realistic". NEVER use metaphors.
-
+    RULES FOR "image_info" (The Text Body):
+    1. Do NOT use bullet points. 
+    2. Write a short paragraph (2-3 sentences max).
+    3. Explain the context: What happened? Why is it important?
+    4. Use simple, conversational English (or Hinglish style).
+    5. NO generic keywords. Write full, engaging sentences.
+    
+    RULES FOR "search_keyword" (The Image Subject):
+    1. Extract the MAIN VISUAL SUBJECT. 
+    2. If it's a person, output: "Portrait of [Name] face realistic"
+    3. If it's a match, output: "[Team A] vs [Team B] cricket match"
+    4. NEVER use metaphors (e.g., DO NOT say "Shining Star", say the person's real name).
+    5. Keep it under 6 words.
+    
+    
     Input News: {text[:2000]}
+    
+    Output JSON format:
+    {{
+        "headline": "Short punchy headline (Max 7 words, Uppercase)",
+        "image_info": "The 2-3 sentence summary here...",
+        "short_caption": "Engaging caption for Instagram #Hashtags",
+        "search_keyword": "Exact visual subject for AI image generator"
+    }}
     """
 
-    # 1. SPEED LAYER
+    # ---------------------------------------------------------
+    # LAYER 1: SPEED (The "Flash" Layer)
+    # ---------------------------------------------------------
+    
+    # 1. Groq (Llama 3.3 70B)
     res = _call_openai_compat("Groq", "https://api.groq.com/openai/v1", os.getenv("GROQ_API_KEY"), "llama-3.3-70b-versatile", prompt)
     if res: return res
 
+    # 2. Cerebras (Llama 3.1 70B)
     res = _call_openai_compat("Cerebras", "https://api.cerebras.ai/v1", os.getenv("CEREBRAS_API_KEY"), "llama3.1-70b", prompt)
     if res: return res
 
-    # 2. INTELLIGENCE LAYER
+    # ---------------------------------------------------------
+    # LAYER 2: INTELLIGENCE (The "Smart" Layer)
+    # ---------------------------------------------------------
+
+    # 3. NVIDIA NIM (Llama 3.1 405B)
     res = _call_openai_compat("Nvidia", "https://integrate.api.nvidia.com/v1", os.getenv("NVIDIA_API_KEY"), "meta/llama-3.1-405b-instruct", prompt)
     if res: return res
 
+    # 4. Grok (xAI)
+    res = _call_openai_compat("Grok", "https://api.x.ai/v1", os.getenv("XAI_API_KEY"), "grok-beta", prompt)
+    if res: return res
+
+    # 5. Together AI (Llama 3.3)
     res = _call_openai_compat("Together", "https://api.together.xyz/v1", os.getenv("TOGETHER_API_KEY"), "meta-llama/Llama-3.3-70B-Instruct-Turbo", prompt)
     if res: return res
 
-    # 3. GOOGLE LAYER
+    # ---------------------------------------------------------
+    # LAYER 3: GOOGLE (Gemini)
+    # ---------------------------------------------------------
+
+    # 6. Gemini 2.0 Flash
     try:
         if os.getenv("GEMINI_API_KEY"):
             from google import genai
@@ -269,78 +313,39 @@ def ai_rvcj_converter(text):
     except Exception as e:
         logger.warning(f"⚠️ Gemini Skipped: {e}")
 
-    # 4. BACKUP LAYER
+    # ---------------------------------------------------------
+    # LAYER 4: BACKUP (Direct APIs)
+    # ---------------------------------------------------------
+
+    # 7. Mistral API
+    if _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt) is not None:
+         return _call_openai_compat("Mistral", "https://api.mistral.ai/v1", os.getenv("MISTRAL_API_KEY"), "mistral-small-latest", prompt)
+
+    # 8. Cohere API
+    try:
+        if os.getenv("COHERE_API_KEY"):
+            r = requests.post(
+                "https://api.cohere.com/v1/chat",
+                headers={"Authorization": f"Bearer {os.getenv('COHERE_API_KEY')}", "Content-Type": "application/json"},
+                json={"message": prompt, "model": "command-r-plus"}
+            )
+            if r.status_code == 200:
+                logger.info("🧠 AI WINNER: Cohere")
+                return _parse_ai_json(r.json()["text"])
+    except: pass
+
+    # ---------------------------------------------------------
+    # LAYER 5: OPENROUTER (The Final Net)
+    # ---------------------------------------------------------
+
+    # 9. OpenRouter
     res = _call_openai_compat("OpenRouter", "https://openrouter.ai/api/v1", os.getenv("OPENROUTER_API_KEY"), "openai/gpt-4o-mini", prompt)
     if res: return res
 
+    # --- FALLBACK (If everything fails) ---
     logger.error("❌ CRITICAL: All AI providers failed. Using manual fallback.")
-    return _fallback_data_safe()
+    return _fallback_data(text)
 
-def _call_openai_compat(provider_name, url, key, model, prompt):
-    if not key: return None
-    import requests
-    try:
-        headers = {
-            "Authorization": f"Bearer {key}", 
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://trendscope.app",
-            "X-Title": "TrendScope"
-        }
-        data = {
-            "model": model,
-            "messages":[{"role": "user", "content": prompt}],
-            "temperature": 0.5,
-            "max_tokens": 500
-        }
-        r = requests.post(f"{url}/chat/completions", headers=headers, json=data, timeout=15)
-        
-        if r.status_code == 200:
-            content = r.json()["choices"][0]["message"]["content"]
-            logger.info(f"🧠 AI WINNER: {provider_name}")
-            return _parse_ai_json(content)
-        else:
-            logger.warning(f"⚠️ {provider_name} Error: {r.status_code}")
-    except Exception as e:
-        logger.warning(f"⚠️ {provider_name} Exception: {e}")
-    return None
-
-def _parse_ai_json(raw):
-    """
-    ✅ FIXED: Aggressively finds valid JSON { } and ignores 'Here is the JSON...' text.
-    """
-    import json
-    import re
-
-    try:
-        # Regex to find the first JSON object enclosed in braces
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            clean_json = match.group(0)
-            data = json.loads(clean_json)
-        else:
-            raise ValueError("No JSON brackets found")
-
-        return {
-            "headline": data.get("headline", "BREAKING NEWS").upper(),
-            "image_info": data.get("image_info", "Details coming soon..."),
-            "short_caption": data.get("short_caption", "TrendScope Update #News 🔥"),
-            "search_keyword": data.get("search_keyword", "")
-        }
-    except Exception as e:
-        logger.error(f"JSON Parse Failed: {e}. Raw text was: {raw[:50]}...")
-        return _fallback_data_safe()
-
-def _fallback_data_safe():
-    return {
-        "headline": "BREAKING NEWS",
-        "image_info": "Latest updates on this developing story. Stay tuned for more details as information becomes available.",
-        "short_caption": "Breaking Update 🔥 #News",
-        "search_keyword": "breaking news studio"
-    }
-
-# ======================================================
-# 6. NEWS ENGINE (Scoring & Fetching)
-# ======================================================
 # ======================================================
 # HELPER FUNCTIONS (Must be below the main function)
 # ======================================================
